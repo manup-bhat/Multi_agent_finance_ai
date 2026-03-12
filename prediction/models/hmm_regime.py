@@ -83,8 +83,10 @@ class HMMRegimeDetector:
         Build feature matrix for HMM.
         Features: [daily_return, log_volatility (rolling 5-day), vix_level (optional)]
         """
-        ret   = nifty_returns.fillna(0.0).values
-        vol5  = nifty_returns.rolling(5).std().fillna(method="bfill").values
+        ret      = nifty_returns.fillna(0.0).values
+        # FIX: pandas >= 2.1 deprecated fillna(method=); pandas 3.0 removed it.
+        # Use .bfill() directly — identical behaviour, forward-compatible.
+        vol5     = nifty_returns.rolling(5).std().bfill().values
         log_vol5 = np.log1p(np.abs(vol5))
 
         if vix_series is not None and not vix_series.empty:
@@ -129,7 +131,11 @@ class HMMRegimeDetector:
 
         self._model         = model
         self._is_fitted     = True
-        self._last_fit_date = nifty_returns.index[-1] if hasattr(nifty_returns.index, "__len__") else pd.Timestamp.now(tz=MARKET_TZ)
+        self._last_fit_date = (
+            nifty_returns.index[-1]
+            if hasattr(nifty_returns.index, "__len__")
+            else pd.Timestamp.now(tz=MARKET_TZ)
+        )
 
         # Log regime statistics
         for raw_state, mapped in self._label_map.items():
@@ -173,7 +179,7 @@ class HMMRegimeDetector:
             {
               "regime_id":   int  (0=Bear, 1=Sideways, 2=Bull)
               "regime_name": str  ("Bear" | "Sideways" | "Bull")
-              "regime_probs": list[float] (probabilities for each regime)
+              "regime_probs": dict[str, float]
             }
         """
         if not self._is_fitted:
@@ -183,7 +189,7 @@ class HMMRegimeDetector:
         raw_states = self._model.predict(X)
         log_probs  = self._model.predict_proba(X)
 
-        current_raw   = raw_states[-1]
+        current_raw    = raw_states[-1]
         current_mapped = self._label_map[current_raw]
 
         # Map probability columns to sorted regime labels
@@ -192,8 +198,8 @@ class HMMRegimeDetector:
             probs[mapped] = float(log_probs[-1, raw_state])
 
         return {
-            "regime_id":   current_mapped,
-            "regime_name": REGIME_NAMES[current_mapped],
+            "regime_id":    current_mapped,
+            "regime_name":  REGIME_NAMES[current_mapped],
             "regime_probs": {REGIME_NAMES[i]: round(probs[i], 4) for i in range(3)},
         }
 
@@ -217,12 +223,12 @@ class HMMRegimeDetector:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump({
-            "model":          self._model,
-            "label_map":      self._label_map,
-            "last_fit_date":  self._last_fit_date,
-            "n_regimes":      self.n_regimes,
-            "refit_days":     self.refit_days,
-            "n_iter":         self.n_iter,
+            "model":           self._model,
+            "label_map":       self._label_map,
+            "last_fit_date":   self._last_fit_date,
+            "n_regimes":       self.n_regimes,
+            "refit_days":      self.refit_days,
+            "n_iter":          self.n_iter,
             "covariance_type": self.covariance_type,
         }, path)
         logger.info("hmm.saved", path=str(path))

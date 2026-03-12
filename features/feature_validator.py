@@ -27,12 +27,12 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class ValidationReport:
     """Result of the anti-lookahead validation."""
-    passed:            bool = True
-    n_features_checked: int = 0
-    same_day_leaks:    list[str] = field(default_factory=list)
-    wfo_violations:    list[str] = field(default_factory=list)
-    null_columns:      list[str] = field(default_factory=list)
-    warnings:          list[str] = field(default_factory=list)
+    passed:             bool = True
+    n_features_checked: int  = 0
+    same_day_leaks:     list[str] = field(default_factory=list)
+    wfo_violations:     list[str] = field(default_factory=list)
+    null_columns:       list[str] = field(default_factory=list)
+    warnings:           list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         status = "✅ PASSED" if self.passed else "❌ FAILED"
@@ -53,18 +53,15 @@ class FeatureValidator:
     """
     Validates that the 70-feature DataFrame has zero lookahead.
 
-    Method:
-      1. For each feature column, compute correlation between
-         SAME-DAY raw close return and the feature value.
-         Correlation > 0.8 flags potential same-day leakage.
+    Check order (all three run per column):
+      1. NaN at position 0 — shifted features must be NaN on first row
+      2. All-NaN column    — broken adapter or missing data source
+      3. High correlation  — correlation > 0.8 with same-day return
 
-      2. Verify that all feature columns are NaN on the FIRST row
-         (shifted data should have NaN at position 0).
-
-      3. Verify WFO fold indices: max(train) + embargo < min(test).
-
-    This is a heuristic check. The ground truth is code review of
-    IndiaFeatureSet._compute_*() methods — all must call .shift(1).
+    IMPORTANT: Check 2 (null detection) runs BEFORE the short-circuit guard
+    in Check 3. An all-NaN series produces zero aligned rows → len(aligned)==0
+    < 50 → continue, which would silently skip the null detection if ordered
+    incorrectly. The correct order is: null_check → short_circuit → correlation.
     """
 
     # Correlation threshold above which a feature is flagged as potentially leaky
@@ -115,7 +112,15 @@ class FeatureValidator:
                     "may not be properly shifted."
                 )
 
-            # ── Check 2: High correlation with same-day return ─────────────────
+            # ── Check 2: All-NaN column ───────────────────────────────────────
+            # FIX: This check MUST precede the short-circuit guard below.
+            # An all-NaN column produces len(aligned)==0 < 50, which causes
+            # `continue` to skip this detection entirely if ordered after.
+            if series.isna().all():
+                report.null_columns.append(col)
+                continue  # no point computing correlation on a completely empty column
+
+            # ── Check 3: High correlation with same-day return ─────────────────
             # Align on common index, drop NaN
             aligned = pd.concat(
                 [series, same_day_return], axis=1
@@ -131,10 +136,6 @@ class FeatureValidator:
                     )
             except Exception:
                 pass
-
-            # ── Check 3: All-NaN column ────────────────────────────────────────
-            if series.isna().all():
-                report.null_columns.append(col)
 
         # ── Mark failure if any hard violations found ──────────────────────────
         if report.same_day_leaks or report.null_columns:
