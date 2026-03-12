@@ -1,0 +1,123 @@
+# India Multi-Agent Financial Prediction Engine
+# 5 services: app + postgres + qdrant + phoenix + mlflow
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL: Prediction logs + feedback ────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: india_engine_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-india_engine}
+      POSTGRES_USER: ${POSTGRES_USER:-engine_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-engine_user} -d ${POSTGRES_DB:-india_engine}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Qdrant: Production vector DB for RAG ─────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: india_engine_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Phoenix (Arize): Agent trace + audit ─────────────────────────────
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: india_engine_phoenix
+    restart: unless-stopped
+    ports:
+      - "6006:6006"   # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - phoenix_data:/root/.phoenix
+    environment:
+      - PHOENIX_WORKING_DIR=/root/.phoenix
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6006/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── MLflow: Model registry + experiment tracking ──────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.11.0
+    container_name: india_engine_mlflow
+    restart: unless-stopped
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER:-engine_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-india_engine}
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI App: Main engine ───────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: india_engine_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - model_cache:/app/.model_cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      phoenix:
+        condition: service_healthy
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - QDRANT_HOST=qdrant
+      - PHOENIX_HOST=phoenix
+      - POSTGRES_HOST=postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  phoenix_data:
+  mlflow_artifacts:
+  model_cache:

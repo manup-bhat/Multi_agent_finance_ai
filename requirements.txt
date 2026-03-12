@@ -1,0 +1,119 @@
+# ══════════════════════════════════════════════════════════════════════
+# Multi-Agent India Financial Prediction Engine
+# requirements.txt — Definitive (March 2026)
+#
+# Key validated facts:
+#   chronos-forecasting 2.2.2: pip package = chronos-forecasting
+#                              import module = chronos   ← NOT chronos_forecasting
+#   timesfm 1.3.0: requires scikit-learn + wandb even on torch path
+#   smartmoneyconcepts: REMOVED — numba==0.58.1 requires numpy<2.0
+#                       Replaced by data/processors/smc_engine.py (pure Python)
+#   praw: REMOVED — no Reddit API; using StockTwits + India RSS
+# ══════════════════════════════════════════════════════════════════════
+
+# ── Core Framework ──────────────────────────────────────────────────
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+httpx>=0.26.0
+aiohttp>=3.9.0
+
+# ── India Data Sources ──────────────────────────────────────────────
+yfinance>=0.2.36
+nsefin>=0.1.0
+nselib>=2.4.2
+nsepython>=2.97
+jugaad-data>=0.24                   # install: pip install jugaad-data --no-deps
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+feedparser>=6.0.0
+lxml>=4.9.1
+importlib-metadata>=6.0
+# praw REMOVED — StockTwits (no key) + India RSS feeds instead
+
+# ── Technical Analysis ──────────────────────────────────────────────
+pandas>=3.0.0
+numpy>=2.4.0
+# pandas-ta REPLACED: import as 'import pandas_ta_classic as ta'
+pandas-ta-classic==0.3.78
+# smartmoneyconcepts REMOVED: numba==0.58.1 conflicts with numpy>=2.4
+# → Replaced by: data/processors/smc_engine.py (pure Python, zero deps)
+finta>=1.3
+scipy>=1.12.0
+statsmodels>=0.14.0
+einops>=0.7.0                       # required by chronos-forecasting
+
+# ── TSFM Models ─────────────────────────────────────────────────────
+# chronos-forecasting: pip name = chronos-forecasting
+#                      import name = chronos  (NOT chronos_forecasting)
+chronos-forecasting>=2.0.0
+# timesfm: v1.3.0 is latest on PyPI; v2.0.0 is GitHub-only (never published)
+# requires scikit-learn + wandb even on torch path
+timesfm==1.3.0
+einshape>=1.0.0
+utilsforecast>=0.1.10
+wandb>=0.17.5                       # required by timesfm 1.3.0
+
+# ── ML Prediction ───────────────────────────────────────────────────
+xgboost>=2.0.0
+lightgbm>=4.2.0
+catboost>=1.2.0
+scikit-learn>=1.4.0
+optuna>=3.5.0
+shap>=0.44.0
+hmmlearn>=0.3.0
+joblib>=1.3.0
+
+# ── Sentiment & NLP ─────────────────────────────────────────────────
+transformers>=4.38.0
+torch>=2.2.0
+sentence-transformers>=3.0.0
+accelerate>=0.27.0
+
+# ── F&O Analysis ────────────────────────────────────────────────────
+py_vollib>=1.0.1
+
+# ── Vector Database ─────────────────────────────────────────────────
+chromadb>=0.4.22
+qdrant-client>=1.7.0
+
+# ── AI Agents ───────────────────────────────────────────────────────
+langchain>=0.3.0
+langgraph>=0.2.0
+langchain-google-genai>=2.0.0
+langchain-groq>=0.2.0
+langchain-community>=0.3.0
+
+# ── Backtesting ─────────────────────────────────────────────────────
+vectorbt>=0.26.0
+
+# ── Model Management ────────────────────────────────────────────────
+mlflow>=2.10.0
+apscheduler>=3.10.0
+
+# ── Frontend ────────────────────────────────────────────────────────
+streamlit>=1.31.0
+plotly>=5.18.0
+
+# ── Observability ───────────────────────────────────────────────────
+arize-phoenix>=4.0.0
+opentelemetry-api>=1.22.0
+opentelemetry-sdk>=1.22.0
+
+# ── Testing ─────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# ── Utilities ───────────────────────────────────────────────────────
+jinja2>=3.1.0
+structlog>=24.1.0
+tenacity>=8.2.0
+pytz>=2024.1
+holidays>=0.40
+safetensors>=0.5.3
+
+# ── Optional ────────────────────────────────────────────────────────
+# breeze-connect>=1.0.0
+# tabpfn>=2.0.0

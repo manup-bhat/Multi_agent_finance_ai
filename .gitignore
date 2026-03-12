@@ -1,0 +1,105 @@
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment & Secrets (CRITICAL — never commit these)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.production.local
+*.env
+
+# ML Model artifacts
+prediction/models/saved/
+storage/model_artifacts/
+storage/chroma_db/
+storage/analysis_history/
+storage/prediction_logs/
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.h5
+*.onnx
+mlruns/
+mlflow-artifacts/
+
+# Data (large files)
+data/raw/
+data/cache/
+data/processed/
+*.csv
+*.parquet
+*.feather
+*.db
+*.sqlite3
+*.xlsx
+*.xls
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+*.iml
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Logs & Diagnostics
+logs/
+*.log
+*.log.*
+diagnos*.log
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+.AppleDouble
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Development
+.vscode-settings.json
+.python-version
+*.bak
+*.tmp
+~*
+
+# Project specific
+cython_debug/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
