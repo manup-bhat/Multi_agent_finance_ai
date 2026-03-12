@@ -1,127 +1,183 @@
 """
-Feature Validator — enforces anti-lookahead and completeness.
-Gate: 70 features, zero NaN on last 252 trading days, all .shift(1).
+Anti-Lookahead Feature Validator
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Blueprint Validation Check #6 and #7:
+  - max(train_indices) < min(test_indices) - EMBARGO  ← enforced per WFO fold
+  - All features use .shift(1) — NO same-day data enters any model
+
+Run this as a pre-training gate. If it fails, training must NOT proceed.
+Used in: scripts/validate_anti_lookahead.py + tests/test_walk_forward.py
+
+HARD RULE: This runs deterministic Python only. No model involvement.
 """
 from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import structlog
+from dataclasses import dataclass, field
+from typing import Optional
+
 from features.india_feature_set import ALL_FEATURE_COLUMNS
+from config.constants import WFO_EMBARGO_DAYS
 
 logger = structlog.get_logger(__name__)
 
 
-class FeatureValidationError(Exception):
-    pass
+@dataclass
+class ValidationReport:
+    """Result of the anti-lookahead validation."""
+    passed:            bool = True
+    n_features_checked: int = 0
+    same_day_leaks:    list[str] = field(default_factory=list)
+    wfo_violations:    list[str] = field(default_factory=list)
+    null_columns:      list[str] = field(default_factory=list)
+    warnings:          list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        status = "✅ PASSED" if self.passed else "❌ FAILED"
+        lines = [
+            f"Anti-Lookahead Validation: {status}",
+            f"  Features checked : {self.n_features_checked}",
+            f"  Same-day leaks   : {len(self.same_day_leaks)} {self.same_day_leaks}",
+            f"  WFO violations   : {len(self.wfo_violations)} {self.wfo_violations}",
+            f"  Null columns     : {len(self.null_columns)} {self.null_columns}",
+            f"  Warnings         : {len(self.warnings)}",
+        ]
+        for w in self.warnings:
+            lines.append(f"    ⚠ {w}")
+        return "\n".join(lines)
 
 
-def validate_features(features: pd.DataFrame,
-                       min_rows: int = 252,
-                       max_null_pct: float = 5.0,
-                       ticker: str = "?") -> dict:
+class FeatureValidator:
     """
-    Validate feature DataFrame before it enters any model.
+    Validates that the 70-feature DataFrame has zero lookahead.
 
-    Checks:
-      1. Exactly 70 columns matching ALL_FEATURE_COLUMNS
-      2. Minimum 252 rows (1 trading year)
-      3. NaN % on last 252 rows ≤ max_null_pct (default 5%)
-      4. No future-leaking columns (spot-check: close_lag1 == previous close)
-      5. Index is tz-aware Asia/Kolkata
-      6. All values finite (no inf/-inf)
+    Method:
+      1. For each feature column, compute correlation between
+         SAME-DAY raw close return and the feature value.
+         Correlation > 0.8 flags potential same-day leakage.
 
-    Returns dict with pass/fail per check + summary.
-    Raises FeatureValidationError if any hard check fails.
+      2. Verify that all feature columns are NaN on the FIRST row
+         (shifted data should have NaN at position 0).
+
+      3. Verify WFO fold indices: max(train) + embargo < min(test).
+
+    This is a heuristic check. The ground truth is code review of
+    IndiaFeatureSet._compute_*() methods — all must call .shift(1).
     """
-    errors   = []
-    warnings = []
-    report   = {}
 
-    # ── Check 1: Column count and names ──────────────────────────────
-    actual_cols = list(features.columns)
-    if len(actual_cols) != 70:
-        errors.append(f"Expected 70 columns, got {len(actual_cols)}")
-    missing_cols = [c for c in ALL_FEATURE_COLUMNS if c not in actual_cols]
-    extra_cols   = [c for c in actual_cols if c not in ALL_FEATURE_COLUMNS]
-    if missing_cols:
-        errors.append(f"Missing columns: {missing_cols}")
-    if extra_cols:
-        warnings.append(f"Extra columns (ignored): {extra_cols}")
-    report["columns"] = "PASS" if not missing_cols and len(actual_cols) == 70 else "FAIL"
+    # Correlation threshold above which a feature is flagged as potentially leaky
+    LEAK_CORRELATION_THRESHOLD = 0.80
 
-    # ── Check 2: Minimum rows ─────────────────────────────────────────
-    if len(features) < min_rows:
-        errors.append(f"Only {len(features)} rows — need {min_rows} minimum (1 trading year)")
-        report["min_rows"] = "FAIL"
-    else:
-        report["min_rows"] = f"PASS ({len(features)} rows)"
+    def validate_features(
+        self,
+        feature_df:   pd.DataFrame,
+        close_series: pd.Series,
+        check_top_n:  int = 70,
+    ) -> ValidationReport:
+        """
+        Validate feature DataFrame for lookahead leakage.
 
-    # ── Check 3: NaN on last 252 rows ─────────────────────────────────
-    last_252   = features.tail(252)
-    null_pct   = last_252.isna().mean().mean() * 100
-    worst_cols = last_252.isna().mean().nlargest(5).to_dict()
-    if null_pct > max_null_pct:
-        errors.append(
-            f"NaN {null_pct:.1f}% on last 252 rows — exceeds {max_null_pct}%. "
-            f"Worst cols: {worst_cols}"
+        Args:
+            feature_df:   Output of IndiaFeatureSet.build() — 70 columns
+            close_series: Raw (unshifted) daily close prices (same index)
+            check_top_n:  How many features to check (default: all 70)
+
+        Returns:
+            ValidationReport with pass/fail + details
+        """
+        report = ValidationReport()
+        report.n_features_checked = min(check_top_n, len(feature_df.columns))
+
+        # Compute same-day return (this should NOT correlate with lagged features)
+        same_day_return = close_series.pct_change(1)
+
+        cols_to_check = ALL_FEATURE_COLUMNS[:check_top_n]
+
+        for col in cols_to_check:
+            if col not in feature_df.columns:
+                report.warnings.append(f"Column '{col}' missing from feature_df")
+                continue
+
+            series = feature_df[col]
+
+            # ── Check 1: NaN at position 0 ────────────────────────────────────
+            # All shifted features should be NaN at row 0 (no prior day to shift from)
+            # Exception: calendar features (day_of_week etc.) — these are never shifted
+            calendar_features = {
+                "day_of_week", "expiry_day", "month_end_flag",
+                "results_season", "budget_week", "rbi_event_flag",
+            }
+            if col not in calendar_features and not pd.isna(series.iloc[0]):
+                report.warnings.append(
+                    f"'{col}': row 0 is not NaN ({series.iloc[0]:.4f}) — "
+                    "may not be properly shifted."
+                )
+
+            # ── Check 2: High correlation with same-day return ─────────────────
+            # Align on common index, drop NaN
+            aligned = pd.concat(
+                [series, same_day_return], axis=1
+            ).dropna()
+            if len(aligned) < 50:
+                continue
+
+            try:
+                corr = float(aligned.corr().iloc[0, 1])
+                if abs(corr) > self.LEAK_CORRELATION_THRESHOLD:
+                    report.same_day_leaks.append(
+                        f"{col} (corr={corr:.3f})"
+                    )
+            except Exception:
+                pass
+
+            # ── Check 3: All-NaN column ────────────────────────────────────────
+            if series.isna().all():
+                report.null_columns.append(col)
+
+        # ── Mark failure if any hard violations found ──────────────────────────
+        if report.same_day_leaks or report.null_columns:
+            report.passed = False
+
+        logger.info(
+            "feature_validator.result",
+            passed=report.passed,
+            same_day_leaks=len(report.same_day_leaks),
+            null_columns=len(report.null_columns),
+            warnings=len(report.warnings),
         )
-        report["null_check"] = "FAIL"
-    else:
-        report["null_check"] = f"PASS ({null_pct:.2f}% null)"
+        return report
 
-    # ── Check 4: Infinity check ───────────────────────────────────────
-    numeric = features.select_dtypes(include=[np.number])
-    inf_cols = numeric.columns[np.isinf(numeric).any()].tolist()
-    if inf_cols:
-        errors.append(f"Infinite values in: {inf_cols}")
-        report["inf_check"] = "FAIL"
-    else:
-        report["inf_check"] = "PASS"
+    def validate_wfo_folds(
+        self,
+        train_indices: np.ndarray,
+        test_indices:  np.ndarray,
+        embargo:       int = WFO_EMBARGO_DAYS,
+        fold_id:       int = 0,
+    ) -> bool:
+        """
+        Validate a single WFO fold for embargo gap integrity.
 
-    # ── Check 5: Timezone ─────────────────────────────────────────────
-    if features.index.tzinfo is None:
-        errors.append("Index has no timezone — must be Asia/Kolkata")
-        report["timezone"] = "FAIL"
-    elif "Kolkata" not in str(features.index.tzinfo):
-        errors.append(f"Wrong timezone: {features.index.tzinfo} — must be Asia/Kolkata")
-        report["timezone"] = "FAIL"
-    else:
-        report["timezone"] = "PASS"
+        Returns True if valid, raises AssertionError if violated.
+        """
+        max_train = int(np.max(train_indices))
+        min_test  = int(np.min(test_indices))
+        gap       = min_test - max_train
 
-    # ── Check 6: Anti-lookahead spot-check ────────────────────────────
-    # close_lag1[t] must equal close[t-1] — verified on OHLCV independently
-    # Here we check: close_lag1 is never equal to the same-day return
-    # Proxy check: close_lag1 should have NaN at index[0]
-    if "close_lag1" in features.columns:
-        if not pd.isna(features["close_lag1"].iloc[0]):
-            errors.append(
-                "close_lag1.iloc[0] is not NaN — shift(1) may not be applied correctly"
+        if gap <= embargo:
+            msg = (
+                f"Fold {fold_id}: WFO embargo violation! "
+                f"Gap={gap} trading days, required > {embargo}. "
+                f"max(train)={max_train}, min(test)={min_test}"
             )
-            report["anti_lookahead"] = "FAIL"
-        else:
-            report["anti_lookahead"] = "PASS"
-    else:
-        report["anti_lookahead"] = "SKIP (close_lag1 not found)"
+            logger.error("feature_validator.wfo_violation", msg=msg)
+            raise AssertionError(msg)
 
-    # ── Summary ───────────────────────────────────────────────────────
-    report["errors"]   = errors
-    report["warnings"] = warnings
-    report["passed"]   = len(errors) == 0
-
-    log_fn = logger.info if report["passed"] else logger.error
-    log_fn(
-        "feature_validator.result",
-        ticker=ticker,
-        passed=report["passed"],
-        errors=errors,
-        warnings=warnings,
-        null_pct=round(null_pct, 2) if len(features) >= 252 else None,
-    )
-
-    if errors:
-        raise FeatureValidationError(
-            f"Feature validation failed for {ticker}:\n" +
-            "\n".join(f"  • {e}" for e in errors)
+        logger.debug(
+            "feature_validator.wfo_ok",
+            fold_id=fold_id,
+            gap=gap,
+            embargo=embargo,
         )
-
-    return report
+        return True

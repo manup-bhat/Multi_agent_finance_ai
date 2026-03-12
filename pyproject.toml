@@ -10,12 +10,22 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "Private"}
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "config*", "data*", "features*", "prediction*",
+    "sentiment*", "agents*", "fno*", "macro*",
+    "backtesting*", "feedback*", "compliance*",
+    "risk*", "embeddings*", "api*", "ui*", "tests*",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+pythonpath = ["."]          # ← THIS LINE is the pytest fix for ModuleNotFoundError
 log_cli = true
 log_cli_level = "INFO"
 
