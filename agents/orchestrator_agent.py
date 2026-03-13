@@ -77,26 +77,27 @@ def _parse_verdict(report: str) -> str:
     return "HOLD"
 
 
-def run_orchestrator_agent(state: IndiaEngineState) -> IndiaEngineState:
+def run_orchestrator_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Orchestrator (Gemini 2.5 Pro), writes final report."""
     ticker = state.get("ticker", "N/A")
     logger.info("orchestrator_agent.start", ticker=ticker)
 
     # Safety: if circuit breaker active, enforce HOLD regardless
     risk = state.get("risk_node_output", {})
+    updates = {}
     if risk.get("circuit_breaker_active", False):
-        state["verdict"] = "HOLD"
+        updates["verdict"] = "HOLD"
         logger.info("orchestrator_agent.circuit_breaker_enforced")
 
     context = _build_orchestrator_context(state)
     report = call_gemini(_PROMPT, context, max_tokens=4096)
-    state["orchestrator_report"] = report
+    updates["orchestrator_report"] = report
 
     # Parse verdict from report (only if not already forced to HOLD)
     if not risk.get("circuit_breaker_active", False):
         parsed_verdict = _parse_verdict(report)
         if parsed_verdict in VALID_VERDICTS:
-            state["verdict"] = parsed_verdict
+            updates["verdict"] = parsed_verdict
 
-    logger.info("orchestrator_agent.done", verdict=state.get("verdict", "HOLD"))
-    return state
+    logger.info("orchestrator_agent.done", verdict=updates.get("verdict", "HOLD"))
+    return updates

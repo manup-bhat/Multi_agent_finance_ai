@@ -30,11 +30,10 @@ def _build_prediction_context(state: IndiaEngineState) -> str:
     )
 
 
-def run_prediction_agent(state: IndiaEngineState) -> IndiaEngineState:
+def run_prediction_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Prediction agent."""
     logger.info("prediction_agent.start", ticker=state.get("ticker"))
     context = _build_prediction_context(state)
     result = call_groq(_PROMPT, context)
-    state["prediction_analysis"] = result
     logger.info("prediction_agent.done")
-    return state
+    return {"prediction_analysis": result}

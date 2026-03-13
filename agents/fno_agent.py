@@ -31,11 +31,10 @@ def _build_fno_context(state: IndiaEngineState) -> str:
     )
 
 
-def run_fno_agent(state: IndiaEngineState) -> IndiaEngineState:
+def run_fno_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs F&O agent."""
     logger.info("fno_agent.start", ticker=state.get("ticker"))
     context = _build_fno_context(state)
     result = call_groq(_PROMPT, context)
-    state["fno_analysis"] = result
     logger.info("fno_agent.done")
-    return state
+    return {"fno_analysis": result}

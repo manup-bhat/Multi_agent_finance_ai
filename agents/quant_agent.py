@@ -32,6 +32,5 @@ def run_quant_agent(state: IndiaEngineState) -> IndiaEngineState:
     logger.info("quant_agent.start", ticker=state.get("ticker"))
     context = _build_quant_context(state)
     result = call_groq(_PROMPT, context)
-    state["quant_analysis"] = result
     logger.info("quant_agent.done")
-    return state
+    return {"quant_analysis": result}

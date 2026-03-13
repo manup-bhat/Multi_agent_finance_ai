@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     # ── LLM ──────────────────────────────────────────────────────────
     google_api_key: str = ""
     groq_api_key: str = ""
+    groq_api_key_1: str = ""
+    groq_api_key_2: str = ""
     gemini_model: str = "gemini-2.5-pro-exp-03-25"
+    gemini_model_fast: str = "gemini-2.5-flash"
     groq_model_primary: str = "llama-3.3-70b-versatile"
     groq_model_fast: str = "llama3-8b-8192"
     gemini_max_tokens: int = 8192

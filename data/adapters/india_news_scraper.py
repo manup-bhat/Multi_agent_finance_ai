@@ -61,11 +61,29 @@ class IndiaNewsScraperClient:
 
     async def get_ticker_news(self, ticker: str, max_articles: int = 10) -> list[dict]:
         term = ticker.upper().replace(".NS", "").replace(".BO", "")
+        # Add basic aliases for common Indian stocks to catch more news
+        aliases = [term]
+        if term == "RELIANCE": aliases.extend(["AMBANI", "JIO"])
+        elif term == "TCS": aliases.extend(["TATA CONSULTANCY"])
+        elif term == "INFY": aliases.extend(["INFOSYS"])
+        elif term == "HDFCBANK": aliases.extend(["HDFC"])
+        elif term == "SBIN": aliases.extend(["STATE BANK", "SBI"])
+        elif term == "ICICIBANK": aliases.extend(["ICICI"])
+        elif term == "ITC": aliases.extend(["ITC LTD"])
+        elif term == "LT": aliases.extend(["LARSEN"])
+        
         all_a = await self.get_all_feeds()
-        return [
-            a for a in all_a
-            if term in a["title"].upper() or term in a["summary"].upper()
-        ][:max_articles]
+        matched = []
+        for a in all_a:
+            text = (a["title"] + " " + a["summary"]).upper()
+            if any(alias in text for alias in aliases):
+                matched.append(a)
+                
+        # If still empty, just return the latest general market news to avoid a blank UI box
+        if not matched:
+            matched = all_a[:max_articles]
+            
+        return matched[:max_articles]
 
     async def health_check(self) -> dict:
         try:

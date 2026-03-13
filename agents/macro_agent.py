@@ -35,11 +35,10 @@ def _build_macro_context(state: IndiaEngineState) -> str:
     )
 
 
-def run_macro_agent(state: IndiaEngineState) -> IndiaEngineState:
+def run_macro_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Macro agent, writes macro_analysis to state."""
     logger.info("macro_agent.start", ticker=state.get("ticker"))
     context = _build_macro_context(state)
     result = call_groq(_PROMPT, context)
-    state["macro_analysis"] = result
     logger.info("macro_agent.done")
-    return state
+    return {"macro_analysis": result}

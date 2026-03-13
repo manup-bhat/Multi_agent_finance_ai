@@ -46,23 +46,21 @@ def call_groq(
     On error, returns a degraded placeholder string (never raises).
     """
     try:
-        from langchain_groq import ChatGroq
-        from langchain_core.messages import SystemMessage, HumanMessage
-        from config.settings import get_settings
+        from utils.groq_client import groq_client
 
-        cfg = get_settings()
-        if not cfg.groq_api_key:
-            return "[GROQ_API_KEY_NOT_SET] Agent unavailable."
-
-        llm = ChatGroq(
-            model=model or cfg.groq_model_primary,
-            api_key=cfg.groq_api_key,
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+        
+        # Automatically uses key 1, falls back to key 2 on rate limit
+        response = groq_client.chat(
+            messages=messages,
+            model=model,
             max_tokens=max_tokens,
-            temperature=temperature,
+            temperature=temperature
         )
-        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_message)]
-        response = llm.invoke(messages)
-        return response.content
+        return response
 
     except Exception as exc:
         logger.warning("groq_call.failed", error=str(exc))
@@ -88,15 +86,29 @@ def call_gemini(
         if not cfg.google_api_key:
             return "[GOOGLE_API_KEY_NOT_SET] Orchestrator unavailable."
 
-        llm = ChatGoogleGenerativeAI(
-            model=cfg.gemini_model,
-            google_api_key=cfg.google_api_key,
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_message)]
-        response = llm.invoke(messages)
-        return response.content
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model=cfg.gemini_model,
+                google_api_key=cfg.google_api_key,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+            response = llm.invoke(messages)
+            return response.content
+        except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                logger.warning("gemini_call.quota_exceeded", falling_back_to=cfg.gemini_model_fast)
+                llm = ChatGoogleGenerativeAI(
+                    model=cfg.gemini_model_fast,
+                    google_api_key=cfg.google_api_key,
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                response = llm.invoke(messages)
+                return response.content
+            else:
+                raise e
 
     except Exception as exc:
         logger.warning("gemini_call.failed", error=str(exc))

@@ -67,7 +67,7 @@ def _is_expiry_today(state: IndiaEngineState) -> bool:
         return False
 
 
-def run_risk_node(state: IndiaEngineState) -> IndiaEngineState:
+def run_risk_node(state: IndiaEngineState) -> dict:
     """
     LangGraph node: Pure Python deterministic risk assessment.
     Writes risk_node_output dict to state.
@@ -159,13 +159,13 @@ def run_risk_node(state: IndiaEngineState) -> IndiaEngineState:
         "notes": notes,
     }
 
-    state["risk_node_output"] = risk_output
+    updates = {"risk_node_output": risk_output}
     if circuit_breaker_active:
-        state["verdict"] = "HOLD"
+        updates["verdict"] = "HOLD"
 
     logger.info(
         "risk_node.done",
         vix=vix, circuit_breaker=circuit_breaker_active,
         risk_level=risk_level, override=override_verdict,
     )
-    return state
+    return updates

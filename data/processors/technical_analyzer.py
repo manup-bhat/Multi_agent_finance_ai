@@ -51,12 +51,22 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df["macd_signal"] = macd.get("MACDs_12_26_9")
         df["macd_hist"]   = macd.get("MACDh_12_26_9")
 
-    df["ema_9"]        = df.ta.ema(length=9)
-    df["ema_21"]       = df.ta.ema(length=21)
-    df["ema_50"]       = df.ta.ema(length=50)
-    df["ema_200"]      = df.ta.ema(length=200)
-    df["sma_20"]       = df.ta.sma(length=20)
-    df["sma_50"]       = df.ta.sma(length=50)
+    def _assign_ta(df_series, name):
+        if df_series is None:
+            return pd.Series(np.nan, index=df.index)
+        if isinstance(df_series, pd.DataFrame):
+            if not df_series.empty:
+                return df_series.iloc[:, 0]
+            else:
+                return pd.Series(np.nan, index=df.index)
+        return df_series
+
+    df["ema_9"]        = _assign_ta(df.ta.ema(length=9), "ema_9")
+    df["ema_21"]       = _assign_ta(df.ta.ema(length=21), "ema_21")
+    df["ema_50"]       = _assign_ta(df.ta.ema(length=50), "ema_50")
+    df["ema_200"]      = _assign_ta(df.ta.ema(length=200), "ema_200")
+    df["sma_20"]       = _assign_ta(df.ta.sma(length=20), "sma_20")
+    df["sma_50"]       = _assign_ta(df.ta.sma(length=50), "sma_50")
 
     # ── Volatility indicators ─────────────────────────────────────────────────
     bb = df.ta.bbands(length=20, std=2)

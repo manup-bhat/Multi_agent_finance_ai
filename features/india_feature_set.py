@@ -364,7 +364,7 @@ class IndiaFeatureSet:
         if delivery_series is not None and not delivery_series.empty:
             out["delivery_pct"] = delivery_series.reindex(df.index).ffill().shift(1)
         else:
-            out["delivery_pct"] = np.nan  # nselib adapter fills this
+            out["delivery_pct"] = pd.Series(0.0, index=df.index, dtype=float)
 
         return out
 

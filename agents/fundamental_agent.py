@@ -18,11 +18,10 @@ def _build_fundamental_context(state: IndiaEngineState) -> str:
     return f"TICKER: {ticker}\n\n=== FUNDAMENTAL DATA (pre-processed) ===\n{fundamental}\n"
 
 
-def run_fundamental_agent(state: IndiaEngineState) -> IndiaEngineState:
-    """LangGraph node: runs Fundamental agent."""
+def run_fundamental_agent(state: IndiaEngineState) -> dict:
+    """LangGraph node: runs Fundamental agent, writes fundamental_analysis to state."""
     logger.info("fundamental_agent.start", ticker=state.get("ticker"))
     context = _build_fundamental_context(state)
     result = call_groq(_PROMPT, context)
-    state["fundamental_analysis"] = result
     logger.info("fundamental_agent.done")
-    return state
+    return {"fundamental_analysis": result}

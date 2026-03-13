@@ -59,12 +59,10 @@ def _build_da_context(state: IndiaEngineState) -> str:
     )
 
 
-def run_devils_advocate_agent(state: IndiaEngineState) -> IndiaEngineState:
-    """LangGraph node: runs Devil's Advocate agent."""
-    logger.info("devils_advocate_agent.start", ticker=state.get("ticker"),
-                amplified=_should_amplify(state))
+def run_devils_advocate_agent(state: IndiaEngineState) -> dict:
+    """LangGraph node: runs Devil's Advocate."""
+    logger.info("devils_advocate_agent.start", ticker=state.get("ticker"))
     context = _build_da_context(state)
     result = call_groq(_PROMPT, context)
-    state["devils_advocate_analysis"] = result
     logger.info("devils_advocate_agent.done")
-    return state
+    return {"devils_advocate_analysis": result}

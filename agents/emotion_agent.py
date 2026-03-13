@@ -24,11 +24,10 @@ def _build_emotion_context(state: IndiaEngineState) -> str:
     )
 
 
-def run_emotion_agent(state: IndiaEngineState) -> IndiaEngineState:
+def run_emotion_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Emotion agent."""
     logger.info("emotion_agent.start", ticker=state.get("ticker"))
     context = _build_emotion_context(state)
     result = call_groq(_PROMPT, context)
-    state["emotion_analysis"] = result
     logger.info("emotion_agent.done")
-    return state
+    return {"emotion_analysis": result}
