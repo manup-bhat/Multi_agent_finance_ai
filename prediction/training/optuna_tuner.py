@@ -62,10 +62,10 @@ class OptunaTuner:
     # ── XGBoost Tuning ────────────────────────────────────────────────────────
     def tune_xgboost(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_val:   pd.DataFrame,
-        y_val:   pd.Series,
+        X_tr: pd.DataFrame,
+        y_tr: pd.Series,
+        X_vl: pd.DataFrame,
+        y_vl: pd.Series,
     ) -> dict:
         """
         Bayesian search over XGBoost hyperparameter space.
@@ -90,19 +90,19 @@ class OptunaTuner:
                 "n_jobs":           -1,
                 "verbosity":        0,
             }
-            X_tr = X_train[ALL_FEATURE_COLUMNS].fillna(0)
-            y_tr = y_train.dropna().astype(int)
-            X_vl = X_val[ALL_FEATURE_COLUMNS].fillna(0)
-            y_vl = y_val.dropna().astype(int)
+            X_train = X_tr[ALL_FEATURE_COLUMNS].fillna(0)
+            y_train = y_tr.dropna().astype(int)
+            X_val   = X_vl[ALL_FEATURE_COLUMNS].fillna(0)
+            y_val   = y_vl.dropna().astype(int)
 
             model = xgb.XGBClassifier(**params)
             model.fit(
-                X_tr, y_tr,
-                eval_set=[(X_vl, y_vl)],
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
                 verbose=False,
             )
-            preds   = model.predict(X_vl)
-            correct = (preds == y_vl.values).mean()
+            preds   = model.predict(X_val)
+            correct = (preds == y_val.values).mean()
             return correct
 
         study = optuna.create_study(
@@ -138,13 +138,13 @@ class OptunaTuner:
     # ── LightGBM Tuning ───────────────────────────────────────────────────────
     def tune_lightgbm(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_val:   pd.DataFrame,
-        y_val:   pd.Series,
+        X_tr: pd.DataFrame,
+        y_tr: pd.Series,
+        X_vl: pd.DataFrame,
+        y_vl: pd.Series,
     ) -> dict:
         """Bayesian search over LightGBM hyperparameter space."""
-        cat_cols = [c for c in LGBM_CATEGORICAL_COLS if c in X_train.columns]
+        cat_cols = [c for c in LGBM_CATEGORICAL_COLS if c in X_tr.columns]
 
         def objective(trial: optuna.Trial) -> float:
             params = {
@@ -164,20 +164,20 @@ class OptunaTuner:
                 "n_jobs":            -1,
                 "verbose":           -1,
             }
-            X_tr = X_train[ALL_FEATURE_COLUMNS].fillna(0)
-            y_tr = y_train.dropna().astype(int)
-            X_vl = X_val[ALL_FEATURE_COLUMNS].fillna(0)
-            y_vl = y_val.dropna().astype(int)
+            X_train = X_tr[ALL_FEATURE_COLUMNS].fillna(0)
+            y_train = y_tr.dropna().astype(int)
+            X_val   = X_vl[ALL_FEATURE_COLUMNS].fillna(0)
+            y_val   = y_vl.dropna().astype(int)
 
             model = lgb.LGBMClassifier(**params)
             model.fit(
-                X_tr, y_tr,
-                eval_set=[(X_vl, y_vl)],
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
                 categorical_feature=cat_cols,
                 callbacks=[lgb.early_stopping(30, verbose=False), lgb.log_evaluation(-1)],
             )
-            preds   = model.predict(X_vl)
-            correct = (preds == y_vl.values).mean()
+            preds   = model.predict(X_val)
+            correct = (preds == y_val.values).mean()
             return correct
 
         study = optuna.create_study(
@@ -206,10 +206,10 @@ class OptunaTuner:
     # ── CatBoost Tuning ───────────────────────────────────────────────────────
     def tune_catboost(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_val:   pd.DataFrame,
-        y_val:   pd.Series,
+        X_tr: pd.DataFrame,
+        y_tr: pd.Series,
+        X_vl: pd.DataFrame,
+        y_vl: pd.Series,
     ) -> dict:
         """Bayesian search over CatBoost hyperparameter space."""
         feat_names = ALL_FEATURE_COLUMNS
@@ -237,24 +237,24 @@ class OptunaTuner:
                 "allow_writing_files": False,
             }
 
-            X_tr = X_train[feat_names].copy()
-            y_tr = y_train.dropna().astype(int)
-            X_vl = X_val[feat_names].copy()
-            y_vl = y_val.dropna().astype(int)
+            X_train = X_tr[feat_names].copy()
+            y_train = y_tr.dropna().astype(int)
+            X_val   = X_vl[feat_names].copy()
+            y_val   = y_vl.dropna().astype(int)
 
             for col in CATBOOST_CATEGORICAL_FEATURES:
-                if col in X_tr.columns:
-                    X_tr[col] = X_tr[col].fillna(0).astype(int)
-                    X_vl[col] = X_vl[col].fillna(0).astype(int)
+                if col in X_train.columns:
+                    X_train[col] = X_train[col].fillna(0).astype(int)
+                    X_val[col]   = X_val[col].fillna(0).astype(int)
 
-            train_pool = Pool(data=X_tr.fillna(0), label=y_tr, cat_features=cat_idx)
-            val_pool   = Pool(data=X_vl.fillna(0), label=y_vl, cat_features=cat_idx)
+            train_pool = Pool(data=X_train.fillna(0), label=y_train, cat_features=cat_idx)
+            val_pool   = Pool(data=X_val.fillna(0),   label=y_val,   cat_features=cat_idx)
 
             model = CatBoostClassifier(**params)
             model.fit(train_pool, eval_set=val_pool, use_best_model=True)
 
             preds   = model.predict(val_pool).flatten().astype(int)
-            correct = (preds == y_vl.values).mean()
+            correct = (preds == y_val.values).mean()
             return correct
 
         study = optuna.create_study(

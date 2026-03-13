@@ -100,6 +100,9 @@ class HMMRegimeDetector:
         self._scaler: Optional[StandardScaler]  = None
         self._label_map: dict[int, int]         = {}
 
+        # Track how many features the scaler was trained on (2 or 3 with VIX)
+        self._n_fit_features: int = 2
+
         # _last_fit_date: wall-clock time when fit() was called.
         # Used by needs_refit(). Set to pd.Timestamp.now() inside fit().
         # Can be overridden directly in tests to simulate stale models.
@@ -122,6 +125,10 @@ class HMMRegimeDetector:
         """
         Assemble raw (unscaled) feature matrix.
         Col 0: daily return | Col 1: log_vol5 | Col 2 (optional): VIX/100
+
+        If the model was trained with VIX (self._n_fit_features == 3) but
+        vix_series is None at predict time, pads with zeros to keep the
+        scaler input dimension consistent.
         """
         ret      = nifty_returns.fillna(0.0).values
         vol5     = nifty_returns.rolling(5).std().bfill().values   # pandas 3.x: .bfill()
@@ -131,6 +138,10 @@ class HMMRegimeDetector:
             vix_aligned = vix_series.reindex(nifty_returns.index).ffill().fillna(15.0)
             vix_norm    = vix_aligned.values / 100.0
             features    = np.column_stack([ret, log_vol5, vix_norm])
+        elif self._n_fit_features == 3:
+            # Trained with VIX but predicting without — pad with neutral 0.15 (VIX=15)
+            vix_pad  = np.full(len(ret), 0.15, dtype=np.float64)
+            features = np.column_stack([ret, log_vol5, vix_pad])
         else:
             features = np.column_stack([ret, log_vol5])
 
@@ -236,6 +247,7 @@ class HMMRegimeDetector:
         self._label_map = {int(sorted_idx[i]): i for i in range(self.n_regimes)}
 
         self._model         = best_model
+        self._n_fit_features = X.shape[1]   # track feature dimensionality for predict
         self._is_fitted     = True
         # Wall-clock time of this fit() call — used by needs_refit()
         self._last_fit_date = pd.Timestamp.now(tz=MARKET_TZ)
@@ -351,6 +363,7 @@ class HMMRegimeDetector:
                 "model":           self._model,
                 "scaler":          self._scaler,
                 "label_map":       self._label_map,
+                "n_fit_features":  self._n_fit_features,  # feature dimension used at fit
                 "last_fit_date":   self._last_fit_date,    # wall-clock fit time
                 "last_data_date":  self._last_data_date,   # training data end date
                 "n_regimes":       self.n_regimes,
@@ -372,6 +385,7 @@ class HMMRegimeDetector:
         self._model           = data["model"]
         self._scaler          = data.get("scaler")
         self._label_map       = data["label_map"]
+        self._n_fit_features  = data.get("n_fit_features", 2)  # default 2 for old models
         self._last_fit_date   = data["last_fit_date"]
         self._last_data_date  = data.get("last_data_date", data["last_fit_date"])
         self.n_regimes        = data["n_regimes"]
