@@ -1,0 +1,16 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "off",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownArgumentType": false,
+  "include": ["."],
+  "exclude": [".venv", "__pycache__", ".pytest_cache"]
+}
