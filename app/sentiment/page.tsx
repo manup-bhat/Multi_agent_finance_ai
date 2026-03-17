@@ -133,9 +133,17 @@ export default function SentimentPage() {
           <h3 className="text-base font-semibold text-text-primary">Fear & Greed Index</h3>
           <HelpPopover content={{
             title: "Fear & Greed Index",
-            body: "Composite index combining India VIX, FII flows, PCR, social sentiment, and GDELT global tone. Range 0–100.",
-            affectsVerdict: "Readings above 80 (Extreme Greed) trigger the Euphoria Warning and can override bullish signals to HOLD.",
-            source: "Composite: VIX (30%) + FII (25%) + PCR (20%) + Social (15%) + GDELT (10%)",
+            body: "A composite score from 0 to 100 that summarises the overall market emotion. 0 = Extreme Fear (everyone is panic-selling), 100 = Extreme Greed (everyone is euphoric and buying). Extreme readings in either direction are contrarian signals — the market tends to reverse when fear or greed peaks.",
+            level: "beginner",
+            tips: [
+              "0–20 = Extreme Fear — historically a buying opportunity",
+              "20–40 = Fear — cautious but opportunities exist",
+              "40–60 = Neutral — balanced market sentiment",
+              "60–80 = Greed — be cautious with new positions",
+              "80–100 = Extreme Greed — Euphoria Warning active",
+            ],
+            affectsVerdict: "A score above 80 activates the Euphoria Warning flag, which overrides STRONG BUY verdicts to BUY and activates the circuit breaker rule.",
+            source: "Composite formula: India VIX (30%) + FII 5-day flow (25%) + NSE PCR (20%) + StockTwits social sentiment (15%) + GDELT news tone (10%)",
           }} />
           {sentiment.euphoria_flag && (
             <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded-badge bg-bearish-bg text-bearish-red">
@@ -288,12 +296,19 @@ export default function SentimentPage() {
         <div className="card-base p-5">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">Recent News Articles</h3>
-            <HelpPopover content={{
-              title: "Sentiment-Scored News",
-              body: "Each article has been scored by FinBERT. Green scores push the composite bullish; red scores push bearish.",
-              affectsVerdict: "Articles from institutional sources are weighted 3x higher than retail sources.",
-              source: "Alpha Vantage News API + RSS feeds — processed via FinBERT",
-            }} />
+          <HelpPopover content={{
+            title: "FinBERT Sentiment-Scored News",
+            body: "FinBERT is a BERT language model fine-tuned specifically on financial text. It scores each article on a scale from -1.0 (very bearish) to +1.0 (very bullish), unlike general sentiment models that were trained on product reviews or social media.",
+            level: "intermediate",
+            tips: [
+              "Score > +0.3 = clearly positive for the stock",
+              "Score < -0.3 = clearly negative for the stock",
+              "Scores near 0 = neutral or mixed news",
+              "Multiple highly negative articles on the same day = news-driven risk flag",
+            ],
+            affectsVerdict: "The average FinBERT score across institutional sources (economic times, business standard, NSE announcements) is weighted 3x higher than retail/social sources.",
+            source: "ProsusAI/finbert model via HuggingFace — applied to Alpha Vantage News API + Finlight RSS",
+          }} />
           </div>
           <div className="space-y-3">
             {sentiment.articles.map((a, i) => (

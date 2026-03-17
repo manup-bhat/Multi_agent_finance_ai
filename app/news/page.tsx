@@ -40,10 +40,17 @@ export default function NewsPage() {
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold text-text-primary">News Feed</h1>
           <HelpPopover content={{
-            title: "Sentiment-Scored News Feed",
-            body: "All news articles for the selected ticker, scored by FinBERT. Green articles push the composite bullish; red push bearish.",
-            affectsVerdict: "Volume and direction of recent news is a key input to the emotion agent.",
-            source: "Alpha Vantage News API + Finlight RSS — processed via FinBERT",
+            title: "FinBERT News Feed",
+            body: "Every article shown here has been automatically scored by FinBERT, a financial-domain BERT model. The score ranges from -1.0 (strongly bearish) to +1.0 (strongly bullish). Unlike general sentiment tools, FinBERT understands financial language — phrases like 'cut guidance' or 'beat estimates' are correctly interpreted.",
+            level: "beginner",
+            tips: [
+              "Green score = positive news for the stock's outlook",
+              "Red score = negative news — earnings miss, regulatory concern, etc.",
+              "Multiple negative articles in one day = news-driven risk flag",
+              "High news volume itself is also a signal — check the post count",
+            ],
+            affectsVerdict: "Average FinBERT score across the last N days (where N = sentiment window) is the institutional_score input to the emotion agent.",
+            source: "Alpha Vantage Financial News API + Finlight RSS + Google Finance RSS — processed via ProsusAI/finbert",
           }} />
         </div>
         <div className="flex items-center gap-2">

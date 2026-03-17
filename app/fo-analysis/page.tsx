@@ -10,6 +10,44 @@ import { getFnO, getApiErrorMessage } from "@/lib/api-client";
 
 const NSE_SYMBOLS = ["BANKNIFTY", "NIFTY", "FINNIFTY", "MIDCPNIFTY"];
 
+function FnoEducationCards() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {[
+        {
+          term: "Put-Call Ratio (PCR)",
+          body: "Ratio of total put OI to call OI. Above 1.2 = heavy put buying = market makers expect a bounce (contrarian bullish). Below 0.8 = heavy call buying = complacency or froth (contrarian bearish).",
+        },
+        {
+          term: "Max Pain Strike",
+          body: "The strike at which the maximum number of option contracts expire worthless. Market tends to drift toward max pain as expiry nears — useful for weekly expiry (every Thursday on NSE).",
+        },
+        {
+          term: "IV Rank (IVR)",
+          body: "Where current implied volatility sits within its 52-week range. IVR > 70 = sell premium strategies (straddles, iron condors). IVR < 30 = buy premium (directional debit spreads).",
+        },
+        {
+          term: "ATM Implied Volatility",
+          body: "Market's expectation of annualised price moves for the at-the-money strike. High ATM IV before major events (budget, RBI policy, earnings) is normal — price the move before entering.",
+        },
+        {
+          term: "Participant OI",
+          body: "NSE publishes daily futures open interest by participant type: FII, DII, and Client (retail). FII net long + Client net short is the classic contrarian bullish setup.",
+        },
+        {
+          term: "Options Greeks",
+          body: "Delta = price sensitivity. Gamma = rate of delta change. Theta = time decay per day. Vega = sensitivity to IV change. Rho = sensitivity to interest rate. ATM options have the highest Gamma and Vega.",
+        },
+      ].map((item) => (
+        <div key={item.term} className="card-base p-4">
+          <div className="text-sm font-semibold text-text-primary mb-1">{item.term}</div>
+          <p className="text-xs text-text-muted leading-relaxed">{item.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function FOPage() {
   const { selectedTicker, analysisData } = useApp();
   const [symbol, setSymbol] = useState("BANKNIFTY");
@@ -48,33 +86,72 @@ export default function FOPage() {
     );
   }
 
+  const isMarketClosed = fno?.source === "market_closed";
+  const isUnavailable = fno?.source === "unavailable";
+
+  const symbolSelector = (
+    <div className="flex gap-1">
+      {NSE_SYMBOLS.map((s) => (
+        <button
+          key={s}
+          onClick={() => setSymbol(s)}
+          className={cn(
+            "px-3 py-1.5 text-xs rounded-badge font-medium transition-all duration-150",
+            symbol === s
+              ? "bg-saffron text-white"
+              : "text-text-muted hover:text-text-primary hover:bg-surface-raised"
+          )}
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="space-y-6 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
-        {/* Symbol selector */}
-        <div className="flex gap-1">
-          {NSE_SYMBOLS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSymbol(s)}
-              className={cn(
-                "px-3 py-1.5 text-xs rounded-badge font-medium transition-all duration-150",
-                symbol === s
-                  ? "bg-saffron text-white"
-                  : "text-text-muted hover:text-text-primary hover:bg-surface-raised"
-              )}
-            >
-              {s}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
+          <HelpPopover content={{
+            title: "F&O (Futures & Options) Analysis",
+            body: "F&O data reveals what institutional traders are positioning for. Put-Call Ratio shows whether big money is protecting downside (bullish) or buying upside calls (bearish). Max Pain shows where most option contracts will expire worthless — the underlying tends to gravitate toward this level near expiry.",
+            affectsVerdict: "F&O agent contributes ~15% weight to the final verdict. High PCR + low IV rank = strong bullish F&O signal.",
+            source: "NSE option chain — live data during market hours (9:15–15:30 IST weekdays)",
+          }} />
         </div>
+        {symbolSelector}
       </div>
 
       {!fno ? (
         <div className="card-base p-8 text-center text-text-muted">
           <p className="font-medium text-text-secondary mb-2">No F&O data available</p>
-          <p className="text-sm">Run an analysis from the Dashboard with F&O enabled.</p>
+          <p className="text-sm">Select a symbol above or run an analysis from the Dashboard with F&O enabled.</p>
+        </div>
+      ) : isMarketClosed ? (
+        <div className="space-y-5">
+          <div className="card-base p-6 border border-warning-amber/20 bg-warning-bg">
+            <div className="flex items-start gap-3">
+              <div className="w-2.5 h-2.5 rounded-full bg-warning-amber flex-shrink-0 mt-1" />
+              <div>
+                <div className="font-semibold text-warning-amber text-sm mb-1">NSE Option Chain Unavailable — Market Closed</div>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  NSE only publishes live option chains during market hours (9:15 AM – 3:30 PM IST, Monday–Friday).
+                  F&O data will load automatically when the market opens. During off-hours, the pre-close snapshot may be available.
+                </p>
+              </div>
+            </div>
+          </div>
+          {symbolSelector}
+          <FnoEducationCards />
+        </div>
+      ) : isUnavailable ? (
+        <div className="space-y-5">
+          <div className="card-base p-6">
+            <p className="text-sm text-bearish-red font-medium mb-2">F&O data currently unavailable</p>
+            <p className="text-xs text-text-muted">{fno.strategy_recommendation}</p>
+          </div>
+          <FnoEducationCards />
         </div>
       ) : (
         <>

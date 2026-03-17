@@ -52,10 +52,17 @@ export default function RiskMonitorPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-xl font-semibold text-text-primary">Risk Monitor</h1>
         <HelpPopover content={{
-          title: "Risk & Circuit Breaker Monitor",
-          body: "Tracks active risk conditions and circuit breaker rules. Circuit breakers automatically reduce position sizing or override verdicts when triggered.",
-          affectsVerdict: "A single active circuit breaker reduces conviction by 1 level (e.g. STRONG BUY → BUY). Two or more active → HOLD only.",
-          source: "Live data from macro + FII/DII APIs, updated every 5 minutes",
+          title: "Risk & Circuit Breaker System",
+          body: "Circuit breakers are automated safeguards that prevent the AI from issuing buy signals during dangerous market conditions. They work like a fuse box — individual rules trip when their thresholds are crossed, reducing position sizing or forcing HOLD mode.",
+          level: "beginner",
+          tips: [
+            "Green dot = rule is not triggered, conditions are safe",
+            "Orange dot = warning zone — approaching the threshold",
+            "Red dot = rule is active — position sizing has been reduced",
+            "Two or more red rules = HOLD mode only, no new entries",
+          ],
+          affectsVerdict: "One active circuit breaker: reduces conviction by 1 level (STRONG BUY → BUY). Two or more active: forces HOLD regardless of all other signals.",
+          source: "Real-time: macro API (VIX) + FII/DII API (streak) + analysis data (Fear & Greed) — refreshed every 5 minutes",
         }} />
       </div>
 
@@ -128,9 +135,17 @@ export default function RiskMonitorPage() {
               <h3 className="text-base font-semibold text-text-primary">Circuit Breaker Rules</h3>
               <HelpPopover content={{
                 title: "Circuit Breaker Rules",
-                body: "Automated safeguards that override or reduce position sizing when extreme market conditions are detected. Orange = warning zone; Red = actively triggered.",
-                affectsVerdict: "Active circuit breakers reduce position sizing and can override BUY signals to HOLD.",
-                source: "Internal risk engine — evaluated before every analysis run",
+                body: "Based on professional risk management frameworks used by Indian mutual funds and hedge funds. Each rule monitors one specific risk condition. When triggered, it automatically reduces position sizing (Elevated VIX) or halts all new entries (High Fear VIX / extended FII selling).",
+                level: "intermediate",
+                tips: [
+                  "VIX Elevated (>20): Position sizes cut by 50%",
+                  "VIX High Fear (>25): Cash-only, no new entries",
+                  "FII Sell Streak (7d): HOLD mode — institutional exodus",
+                  "Euphoria (F&G > 80): BUY downgraded to HOLD",
+                  "Global Shock: New entries deferred for 1 session",
+                ],
+                affectsVerdict: "Circuit breakers are evaluated before every /analyze call. They are the only rules that can override an AI agent verdict.",
+                source: "Internal risk_node.py — evaluated at start and end of every analysis pipeline run",
               }} />
               <div className="ml-auto flex items-center gap-2">
                 {activeBreakers > 0 && (
@@ -198,12 +213,13 @@ export default function RiskMonitorPage() {
             <div className="card-base p-5">
               <div className="flex items-center gap-2 mb-4">
                 <h3 className="text-base font-semibold text-text-primary">Key Risks for {analysisData.ticker}</h3>
-                <HelpPopover content={{
-                  title: "AI-Identified Key Risks",
-                  body: "These risks are extracted by the AI analysis agents from the current macro, technical, and sentiment environment.",
-                  affectsVerdict: "Each identified risk reduces confidence by a calibrated amount in the multi-agent scoring model.",
-                  source: "Multi-agent risk identification — updated on each analysis run",
-                }} />
+              <HelpPopover content={{
+                title: "AI-Identified Key Risks",
+                body: "These specific risk factors were identified by the 9-agent pipeline for this stock at the time of the last analysis run. They are extracted from a combination of macro conditions, technical signals, sentiment warnings, and F&O market positioning — not generic market risks.",
+                level: "intermediate",
+                affectsVerdict: "Each identified risk reduces the overall confidence score by a calibrated amount. More than 3 active key risks will suppress a STRONG BUY verdict to BUY.",
+                source: "LangGraph risk_node.py — evaluated on current state of all 9-agent outputs after synthesis",
+              }} />
               </div>
               <div className="space-y-2">
                 {analysisData.key_risks.map((risk, i) => (

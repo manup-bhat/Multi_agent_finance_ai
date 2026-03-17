@@ -166,10 +166,17 @@ export default function ModelPerformancePage() {
     <div className="flex items-center gap-2">
       <h1 className="text-xl font-semibold text-text-primary">Model Performance</h1>
       <HelpPopover content={{
-        title: "How are Models Evaluated?",
-        body: "Each ML model is evaluated on out-of-sample data using walk-forward validation — never on the same data it was trained on. This mirrors real trading conditions.",
-        affectsVerdict: "Models with F1 < 0.55 or Sharpe < 0.5 receive lower ensemble weight. A 'Retrain' flag means the model needs fresh training data.",
-        source: "Walk-forward validation on last 6 months of NSE data — re-evaluated weekly",
+        title: "ML Model Walk-Forward Performance",
+        body: "Walk-forward validation is the gold standard for evaluating trading models. Each model is trained on historical data, then tested on the following period it never saw — this process repeats across all available data. It simulates real trading and prevents 'curve fitting' where a model looks great on past data but fails in production.",
+        level: "advanced",
+        tips: [
+          "F1 Score > 0.65 = model is reliably identifying directional moves",
+          "Sharpe Ratio > 1.0 = strategy returns are well above its risk level",
+          "Sharpe < 0.5 = model is taking too much risk for its returns",
+          "Models are re-evaluated weekly as new NSE data arrives",
+        ],
+        affectsVerdict: "Models with F1 < 0.55 receive a reduced ensemble weight. Models with Sharpe < 0.5 trigger a 'Retrain' flag and are de-prioritised in the final verdict synthesis.",
+        source: "Walk-forward validation on rolling 6-month out-of-sample NSE data — evaluated in prediction/inference/prediction_service.py",
       }} />
     </div>
   );

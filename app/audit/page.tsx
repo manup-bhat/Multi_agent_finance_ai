@@ -214,8 +214,15 @@ export default function AuditPage() {
                           </div>
                           <div className="flex justify-between">
                             <span className="text-text-muted">FII net</span>
-                            <span className="text-text-secondary tabular-nums">
-                              {entry.fii_net_at_run != null ? `₹${(entry.fii_net_at_run / 100).toFixed(0)}Cr` : "—"}
+                            <span className={cn(
+                              "tabular-nums font-medium text-xs",
+                              entry.fii_net_at_run == null ? "text-text-muted"
+                                : entry.fii_net_at_run >= 0 ? "text-bullish-green"
+                                : "text-bearish-red"
+                            )}>
+                              {entry.fii_net_at_run != null
+                                ? `${entry.fii_net_at_run >= 0 ? "+" : ""}₹${Math.abs(entry.fii_net_at_run).toLocaleString("en-IN", { maximumFractionDigits: 0 })}Cr`
+                                : "—"}
                             </span>
                           </div>
                         </div>

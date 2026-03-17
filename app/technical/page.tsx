@@ -85,12 +85,19 @@ export default function TechnicalPage() {
         <div className="card-base p-5">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">RSI Analysis</h3>
-            <HelpPopover content={{
-              title: "RSI (Relative Strength Index)",
-              body: "RSI above 70 is overbought, below 30 is oversold. Neutral range: 30–70.",
-              affectsVerdict: "RSI is one of the top SHAP features in the prediction model.",
-              source: "Computed via technical_analyzer.py on NSE OHLCV data",
-            }} />
+          <HelpPopover content={{
+            title: "RSI — Relative Strength Index",
+            body: "RSI measures how fast a stock is moving up or down, on a scale of 0–100. Think of it as a speedometer for momentum. It is calculated over the last 14 trading days.",
+            level: "beginner",
+            tips: [
+              "Above 70 = Overbought — stock rose too fast, pullback likely",
+              "Below 30 = Oversold — stock fell too fast, bounce likely",
+              "Between 30–70 = Normal zone, trend is intact",
+              "Divergence (price rising but RSI falling) is an early reversal warning",
+            ],
+            affectsVerdict: "RSI is consistently ranked as a top-3 SHAP feature in the XGBoost/LightGBM models. RSI < 30 combined with a bullish macro backdrop is one of the strongest buy signals.",
+            source: "Computed using Wilder smoothing on NSE daily OHLCV via technical_analyzer.py",
+          }} />
           </div>
           <div className="flex items-center gap-6">
             <div>
@@ -119,12 +126,19 @@ export default function TechnicalPage() {
         <div className="card-base p-5">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">MACD</h3>
-            <HelpPopover content={{
-              title: "MACD Histogram",
-              body: "Positive histogram = bullish momentum. Negative = bearish. Crossovers are key signals.",
-              affectsVerdict: "MACD is computed from 12/26-day EMAs. Used by the Quant Agent.",
-              source: "computed on NSE daily OHLCV via technical_analyzer.py",
-            }} />
+          <HelpPopover content={{
+            title: "MACD — Moving Average Convergence Divergence",
+            body: "MACD shows whether short-term price momentum is stronger or weaker than long-term momentum. The histogram is the gap between the MACD line and its signal line — bigger bars mean stronger momentum.",
+            level: "intermediate",
+            tips: [
+              "Histogram above zero = short-term momentum is rising (bullish)",
+              "Histogram below zero = short-term momentum is falling (bearish)",
+              "Zero-line crossover = potential trend change signal",
+              "Calculated from 12-day EMA minus 26-day EMA; signal line is 9-day EMA of that",
+            ],
+            affectsVerdict: "The Quant Agent uses MACD histogram sign and slope as a directional confirmation. A positive MACD histogram combined with RSI 40–70 is the 'clean trend' pattern.",
+            source: "Computed on NSE daily OHLCV — technical_analyzer.py (fast=12, slow=26, signal=9)",
+          }} />
           </div>
           <div className="flex items-center gap-4">
             <div className={cn(
@@ -148,12 +162,19 @@ export default function TechnicalPage() {
         <div className="card-base p-5">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">EMA Trend</h3>
-            <HelpPopover content={{
-              title: "Exponential Moving Averages",
-              body: "EMA21 tracks the last 21 days, EMA50 tracks 50 days. When price is above EMA21 and EMA21 is above EMA50, the trend is bullish. Crossovers are strong signals.",
-              affectsVerdict: "Price > EMA21 > EMA50 is a key condition for a BULLISH regime classification in the trend agent.",
-              source: "Computed on NSE daily OHLCV — technical_analyzer.py",
-            }} />
+          <HelpPopover content={{
+            title: "EMA — Exponential Moving Averages",
+            body: "EMAs are smoothed averages that give more weight to recent prices than old ones. EMA21 is 'fast' (sensitive to recent moves) and EMA50 is 'slow' (stable baseline). When the fast EMA is above the slow EMA, the stock is in an uptrend.",
+            level: "beginner",
+            tips: [
+              "Price > EMA21 > EMA50 = strong uptrend (all aligned bullish)",
+              "Price < EMA21 < EMA50 = strong downtrend",
+              "EMA21 crossing above EMA50 = 'Golden Cross' — bullish signal",
+              "EMA21 crossing below EMA50 = 'Death Cross' — bearish signal",
+            ],
+            affectsVerdict: "The trend agent requires Price > EMA21 > EMA50 for a BULLISH regime classification. This is the primary condition checked before any buy signal is issued.",
+            source: "Computed on NSE daily OHLCV — technical_analyzer.py (exponential smoothing, adjust=False)",
+          }} />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[

@@ -67,10 +67,17 @@ export default function FIIDIIPage() {
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-base font-semibold text-text-primary">Latest Institutional Flows</h3>
           <HelpPopover content={{
-            title: "FII / DII Net Flows",
-            body: "Foreign Institutional Investors (FII) and Domestic Institutional Investors (DII) net buy/sell data. When both are buying, it signals strong institutional confidence.",
-            affectsVerdict: "FII 5-day average is one of the top SHAP features. FII selling for 7+ consecutive days triggers a streak alert.",
-            source: "NSE India participant-wise trading data — daily post-market update",
+            title: "FII & DII Net Flows",
+            body: "FII (Foreign Institutional Investors) are large global funds like hedge funds and foreign pension funds that invest in Indian markets. DII (Domestic Institutional Investors) are Indian mutual funds, insurance companies, and pension funds. Their net buy/sell activity is the biggest driver of index moves in India.",
+            level: "beginner",
+            tips: [
+              "FII net buy = foreign money entering India = bullish for the market",
+              "FII net sell = foreign money leaving = bearish, often due to US/global concerns",
+              "DII often buys when FII sells — they are seen as a stabilising force",
+              "FII + DII both buying = strongest institutional consensus signal",
+            ],
+            affectsVerdict: "FII 5-day rolling net flow is consistently in the top-5 SHAP features across all three ML models. A 7-day consecutive selling streak is a hard risk flag.",
+            source: "NSE India participant-wise daily trading data — published post-market, sourced via nselib",
           }} />
           <span className="text-xs text-text-muted">{fiiDii.date}</span>
         </div>
@@ -145,10 +152,17 @@ export default function FIIDIIPage() {
         <div className="flex items-center gap-2 mb-3">
           <h3 className="text-base font-semibold text-text-primary">Flow Analysis</h3>
           <HelpPopover content={{
-            title: "FII/DII Flow Analysis",
-            body: "Sustained multi-day buying/selling trends are more significant than single-day moves. The streak counter tracks consecutive buy/sell days.",
-            affectsVerdict: "FII streak of 5+ buying days is a strong bullish signal; 5+ selling days triggers a caution flag.",
-            source: "NSE daily participant-wise cash + F&O data",
+            title: "FII Flow Streak Analysis",
+            body: "A single day of FII selling is noise. A sustained streak of 5–7+ consecutive selling days is a meaningful signal that foreign institutions are reducing Indian exposure — often linked to US dollar strengthening, Fed rate concerns, or India-specific political risk.",
+            level: "intermediate",
+            tips: [
+              "3-day streak = minor trend, watch carefully",
+              "5-day streak = elevated risk, reduce new positions",
+              "7-day streak = circuit breaker rule triggered (HOLD mode)",
+              "Streak reversal (from selling to buying) is often a strong entry signal",
+            ],
+            affectsVerdict: "FII selling streak >= 7 days activates the circuit breaker and forces the verdict to HOLD regardless of other signals.",
+            source: "NSE daily participant-wise cash + F&O data — build_flow_report() in macro/fii_dii_tracker.py",
           }} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

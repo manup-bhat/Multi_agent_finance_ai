@@ -59,12 +59,20 @@ export default function SectorRotationPage() {
   const heading = (
     <div className="flex items-center gap-2">
       <h1 className="text-xl font-semibold text-text-primary">Sector Rotation</h1>
-      <HelpPopover content={{
-        title: "What is Sector Rotation?",
-        body: "Money flows between sectors of the economy in predictable cycles. The Relative Rotation Graph (RRG) plots each sector's momentum versus its strength relative to the Nifty50 benchmark, showing which sectors are gaining or losing favour.",
-        affectsVerdict: "When the selected stock's sector is in the Leading quadrant, bullish signals receive higher weighting in the macro agent.",
-        source: "NSE sector indices — rolling 12-week momentum and relative strength vs Nifty50",
-      }} />
+        <HelpPopover content={{
+          title: "Sector Rotation & Relative Rotation Graph (RRG)",
+          body: "Every economic cycle, institutional money rotates between sectors — from defensive sectors (FMCG, Pharma) during downturns to cyclical sectors (Metals, Auto, Real Estate) during recoveries. The Relative Rotation Graph (RRG) visualises this rotation in real time by plotting each sector's relative strength and momentum against the Nifty50 benchmark.",
+          level: "intermediate",
+          tips: [
+            "Leading (top-right) = outperforming and still gaining — best to invest",
+            "Weakening (top-left) = still strong but losing momentum — consider exit",
+            "Lagging (bottom-left) = underperforming and still falling — avoid",
+            "Improving (bottom-right) = weak but gaining momentum — early entry",
+            "Sectors rotate clockwise through these quadrants over time",
+          ],
+          affectsVerdict: "If a stock's sector is in the Leading quadrant, bullish signals receive a 10–15% confidence boost. Lagging sectors reduce confidence by the same amount.",
+          source: "NSE sector indices (Nifty Auto, IT, FMCG etc.) via yfinance — rolling 12-week RS and momentum calculation",
+        }} />
     </div>
   );
 

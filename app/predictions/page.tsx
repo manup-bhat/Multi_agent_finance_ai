@@ -132,10 +132,17 @@ export default function PredictionsPage() {
               AI Price Forecast — {horizon}-Day Horizon
             </h3>
             <HelpPopover content={{
-              title: "AI Price Forecast — Chronos-2",
-              body: "Amazon Chronos-2 time-series model generates probabilistic price forecasts. P10/P50/P90 represent bear/base/bull scenarios.",
-              affectsVerdict: "The P50 forecast is used as the primary price target. Wide P10–P90 band signals high uncertainty.",
-              source: "Amazon Chronos-2 pretrained model with India-specific covariates",
+              title: "Chronos-2 Probabilistic Price Forecast",
+              body: "Amazon Chronos-2 is a state-of-the-art time-series model pre-trained on millions of real-world datasets. It does not predict direction — it predicts a range of likely prices. P10 is the pessimistic case (only 10% chance price goes below this), P50 is the median scenario, and P90 is the optimistic case.",
+              level: "intermediate",
+              tips: [
+                "P50 = most likely price target over the selected horizon",
+                "P10–P90 band width = uncertainty measure — wider band = less confident",
+                "Horizon 5 days = very short-term swing trade target",
+                "Horizon 30 days = medium-term positional trade target",
+              ],
+              affectsVerdict: "P50 is the primary price target shown in the verdict. If P50 > current price by more than 2%, it reinforces a BUY signal. The band width (P90-P10) affects position sizing — wide bands reduce conviction.",
+              source: "Amazon Chronos-2 (pretrained, huggingface) with India-specific macro + technical covariates",
             }} />
           </div>
 
@@ -242,10 +249,17 @@ export default function PredictionsPage() {
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">Direction Probability</h3>
             <HelpPopover content={{
-              title: "Direction Probability",
-              body: "The XGBoost/LightGBM/CatBoost ensemble outputs 5-class probabilities. The highest-probability class is the current prediction.",
-              affectsVerdict: "Total upside probability (Very Bullish + Bullish) vs downside probability determines signal strength.",
-              source: "Ensemble of XGBoost + LightGBM + CatBoost — 5-class classification",
+              title: "ML Ensemble Direction Probability",
+              body: "Three gradient boosting models (XGBoost, LightGBM, CatBoost) each independently predict the probability of 5 outcome classes: Very Bearish, Bearish, Neutral, Bullish, Very Bullish. Their outputs are averaged into a final distribution.",
+              level: "advanced",
+              tips: [
+                "Bullish + Very Bullish combined > 60% = high conviction BUY",
+                "Bearish + Very Bearish combined > 60% = high conviction SELL",
+                "Models are trained on 80+ features including RSI, MACD, VIX, FII flows, and earnings",
+                "Walk-forward validation ensures no look-ahead bias",
+              ],
+              affectsVerdict: "The combined upside probability (Bullish + Very Bullish) is the primary signal. Confidence > 70% is required for STRONG BUY/SELL; below 50% = HOLD.",
+              source: "XGBoost + LightGBM + CatBoost ensemble — trained on NSE data with India-specific features",
             }} />
           </div>
           <div className="space-y-3">
@@ -289,10 +303,17 @@ export default function PredictionsPage() {
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">Price Target Summary</h3>
             <HelpPopover content={{
-              title: "Price Targets",
-              body: "Probabilistic price targets for the selected horizon. P50 is the most likely outcome; P10/P90 bracket the uncertainty range.",
-              affectsVerdict: "The gap between P90 and P10 relative to current price determines position sizing aggressiveness.",
-              source: "Chronos-2 time-series model output",
+              title: "Price Target Scenarios (P10 / P50 / P90)",
+              body: "These are percentile forecasts from the Chronos-2 model. P10 is the bear case — there is only a 10% probability the price closes below this level. P50 is the median — the 50/50 scenario. P90 is the bull case — only 10% chance price exceeds this.",
+              level: "beginner",
+              tips: [
+                "Use P50 as your primary price target for a trade",
+                "Use P10 as your stop-loss reference point",
+                "Use P90 as your take-profit reference point",
+                "Narrow band (P90-P10 < 3%) = high-confidence prediction",
+              ],
+              affectsVerdict: "Risk:Reward ratio is computed as (P90 - current) / (current - P10). A ratio above 2:1 strengthens a BUY recommendation.",
+              source: "Chronos-2 probabilistic forecasting model — outputs quantile forecasts at P10/P50/P90",
             }} />
           </div>
 

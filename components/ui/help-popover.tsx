@@ -1,13 +1,20 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { Info, X } from "lucide-react";
+import { Info, X, BookOpen, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface HelpContent {
+export interface HelpContent {
   title: string;
+  /** Plain-English summary — aim for 2–3 sentences a beginner can understand */
   body: string;
+  /** How this indicator or metric affects the AI verdict/confidence */
   affectsVerdict?: string;
+  /** What technical level this is: beginner / intermediate / advanced */
+  level?: "beginner" | "intermediate" | "advanced";
+  /** Where the data comes from */
   source?: string;
+  /** Optional quick-reference bullet points (max 4) */
+  tips?: string[];
 }
 
 interface HelpPopoverProps {
@@ -15,11 +22,16 @@ interface HelpPopoverProps {
   className?: string;
 }
 
+const LEVEL_STYLES: Record<NonNullable<HelpContent["level"]>, { label: string; cls: string }> = {
+  beginner:     { label: "Beginner Friendly", cls: "bg-bullish-bg text-bullish-green" },
+  intermediate: { label: "Intermediate",      cls: "bg-saffron-light text-saffron" },
+  advanced:     { label: "Advanced",          cls: "bg-neutral-bg text-neutral-blue" },
+};
+
 export function HelpPopover({ content, className }: HelpPopoverProps) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Close on Escape key
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -28,6 +40,16 @@ export function HelpPopover({ content, className }: HelpPopoverProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
+
+  // Determine popup alignment — avoid going off-screen to the right
+  const [alignLeft, setAlignLeft] = useState(false);
+  useEffect(() => {
+    if (!open || !popoverRef.current) return;
+    const rect = popoverRef.current.getBoundingClientRect();
+    setAlignLeft(rect.right + 320 > window.innerWidth);
+  }, [open]);
+
+  const level = content.level ? LEVEL_STYLES[content.level] : null;
 
   return (
     <div className={cn("relative inline-block", className)} ref={popoverRef}>
@@ -48,19 +70,32 @@ export function HelpPopover({ content, className }: HelpPopoverProps) {
 
           {/* Popover panel */}
           <div
-            className="absolute right-0 top-7 z-50 w-80 rounded-card border border-border bg-surface shadow-elevated animate-in fade-in-0 slide-in-from-top-2 duration-150"
+            className={cn(
+              "absolute top-7 z-50 w-88 max-w-[min(22rem,calc(100vw-2rem))] rounded-card border border-border bg-surface shadow-elevated",
+              "animate-in fade-in-0 slide-in-from-top-2 duration-150",
+              alignLeft ? "left-0" : "right-0"
+            )}
+            style={{ width: "22rem" }}
             role="dialog"
             aria-modal="true"
             aria-label={content.title}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border">
-              <h4 className="font-semibold text-sm text-saffron">{content.title}</h4>
+            <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-border">
+              <div className="flex items-center gap-2 min-w-0">
+                <BookOpen size={13} className="text-saffron flex-shrink-0" />
+                <h4 className="font-semibold text-sm text-saffron truncate">{content.title}</h4>
+                {level && (
+                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-badge font-medium flex-shrink-0 hidden sm:inline-flex", level.cls)}>
+                    {level.label}
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close help"
-                className="text-text-muted hover:text-text-primary transition-colors"
+                className="p-0.5 text-text-muted hover:text-text-primary transition-colors flex-shrink-0 ml-2"
               >
                 <X size={13} />
               </button>
@@ -70,21 +105,36 @@ export function HelpPopover({ content, className }: HelpPopoverProps) {
               {/* Plain-English explanation */}
               <p className="text-xs text-text-secondary leading-relaxed">{content.body}</p>
 
+              {/* Quick tips */}
+              {content.tips && content.tips.length > 0 && (
+                <div className="space-y-1.5">
+                  {content.tips.map((tip, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-saffron flex-shrink-0 mt-1.5" />
+                      <p className="text-xs text-text-secondary leading-relaxed">{tip}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {content.affectsVerdict && (
-                <div className="rounded-btn bg-saffron-light px-3 py-2">
-                  <div className="text-xs font-semibold text-saffron uppercase tracking-widest mb-1">
-                    How it affects the verdict
+                <div className="rounded-btn bg-saffron-light px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <TrendingUp size={11} className="text-saffron" />
+                    <div className="text-[10px] font-semibold text-saffron uppercase tracking-widest">
+                      How it affects the verdict
+                    </div>
                   </div>
                   <p className="text-xs text-text-primary leading-relaxed">{content.affectsVerdict}</p>
                 </div>
               )}
 
               {content.source && (
-                <div>
-                  <div className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1">
+                <div className="pt-2 border-t border-border">
+                  <div className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-0.5">
                     Data source
                   </div>
-                  <p className="text-xs text-text-secondary">{content.source}</p>
+                  <p className="text-[11px] text-text-muted leading-relaxed">{content.source}</p>
                 </div>
               )}
             </div>

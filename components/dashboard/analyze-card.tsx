@@ -1,11 +1,12 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Play, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { HelpPopover } from "@/components/ui/help-popover";
+import { NSE_TICKERS } from "@/lib/mock-data";
 
 const STAGES = [
   { label: "Pre-flight" },
@@ -21,25 +22,33 @@ export function AnalyzeCard() {
   const [lastRun, setLastRun] = useState<Date | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(28);
 
+  const tickerMeta = useMemo(
+    () => NSE_TICKERS.find((t) => t.symbol === selectedTicker),
+    [selectedTicker]
+  );
+
   useEffect(() => {
     if (!isAnalyzing) return;
     setProgress(0);
     setTimeRemaining(28);
+    // Use the setter from app-context — stable reference, intentionally excluded from deps
     setAnalysisStage(0);
 
     let current = 0;
     const interval = setInterval(() => {
       current = Math.min(current + 2, 100);
-      setProgress(current);
-      setAnalysisStage(Math.min(
+      const stageIndex = Math.min(
         Math.floor((current / 100) * STAGES.length),
         STAGES.length - 1
-      ));
+      );
+      setProgress(current);
+      setAnalysisStage(stageIndex);
       setTimeRemaining(Math.max(0, Math.ceil(28 * (1 - current / 100))));
       if (current >= 100) clearInterval(interval);
     }, 600);
     return () => clearInterval(interval);
-  }, [isAnalyzing, setAnalysisStage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnalyzing]);
 
   async function handleRun() {
     setIsAnalyzing(true);
@@ -72,9 +81,9 @@ export function AnalyzeCard() {
         {/* Left: Ticker + Help */}
         <div className="min-w-0 flex items-start gap-2">
           <div>
-            <div className="text-2xl font-bold text-text-primary tabular-nums">{selectedTicker}</div>
+            <div className="text-2xl font-bold text-text-primary tabular-nums">{selectedTicker.replace(".NS", "")}</div>
             <div className="text-sm text-text-muted mt-0.5">
-              {selectedTicker === "RELIANCE.NS" ? "Reliance Industries Ltd" : "NSE Listed Security"}
+              {tickerMeta?.name ?? "NSE Listed Security"}{tickerMeta?.sector ? ` · ${tickerMeta.sector}` : ""}
             </div>
           </div>
           <HelpPopover content={{

@@ -106,10 +106,17 @@ export default function MacroPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-xl font-semibold text-text-primary">Macro India</h1>
         <HelpPopover content={{
-          title: "What is Macro Analysis?",
-          body: "Macro analysis looks at the big picture — market fear (VIX), currency strength (USD/INR), commodity prices (crude oil), and foreign investor flows (FII). These factors affect all NSE stocks.",
-          affectsVerdict: "If VIX is elevated, USD is weak, or FII is selling heavily, the macro agent assigns a bearish macro score regardless of individual stock technicals.",
-          source: "Live data: NSE, yfinance — refreshed every 10 minutes",
+          title: "India Macro Dashboard",
+          body: "Macro analysis looks at the big economic picture that affects all Indian stocks simultaneously — regardless of individual company fundamentals. Even if a company's earnings are great, a macro headwind (high VIX, weak rupee, FII selling) can push its stock down.",
+          level: "beginner",
+          tips: [
+            "India VIX = market fear gauge; above 18 means investors are nervous",
+            "USD/INR rising = rupee weakening = bad for import-heavy and IT stocks",
+            "Brent crude above $90 = inflation pressure for India's import bill",
+            "FII selling + rising VIX + weak rupee = triple macro headwind",
+          ],
+          affectsVerdict: "The macro agent's output accounts for approximately 30% of the final verdict weight. Strong macro headwinds can reduce a STRONG BUY to BUY or trigger HOLD.",
+          source: "Live data: yfinance (^INDIAVIX, USDINR=X, BZ=F, ^NSEBANK, ^NSEI) — refreshed every 10 minutes",
         }} />
       </div>
 
@@ -119,9 +126,16 @@ export default function MacroPage() {
           <h3 className="text-base font-semibold text-text-primary">Pre-Market Global Cues</h3>
           <HelpPopover content={{
             title: "Pre-Market Global Cues",
-            body: "Key global market indicators. SGX Nifty is the best leading indicator for Nifty50 opening direction.",
-            affectsVerdict: "Strong negative global cues (SGX Nifty down >100pts + crude spike) can override the macro agent's bullish stance.",
-            source: "SGX Nifty, USD/INR, Brent Crude via yfinance — live data",
+            body: "Before NSE opens at 9:15 AM IST, Indian traders watch Singapore Exchange (SGX) Nifty futures to gauge how the Indian market will open. A strong positive SGX Nifty suggests a gap-up opening; a negative one suggests a gap-down.",
+            level: "beginner",
+            tips: [
+              "SGX Nifty > +100pts = expect a bullish gap-up opening on NSE",
+              "SGX Nifty < -100pts = expect a bearish gap-down opening",
+              "USD/INR > 85 = rupee weakness — watch for FII outflows",
+              "Brent Crude > $90/bbl = elevated inflation risk for India",
+            ],
+            affectsVerdict: "SGX Nifty below -1.5% triggers a global cue circuit breaker, temporarily deferring new long entries.",
+            source: "SGX Nifty proxy (BankNifty/Nifty ratio), USD/INR, Brent Crude — fetched via yfinance",
           }} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -147,12 +161,19 @@ export default function MacroPage() {
         <div className="lg:col-span-3 card-base p-5">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-base font-semibold text-text-primary">India VIX Status</h3>
-            <HelpPopover content={{
-              title: "India VIX",
-              body: "India VIX measures market fear. Zone bands: Complacency (<13), Normal (13–18), Elevated (18–25), High Fear (>25).",
-              affectsVerdict: "VIX crossing into Elevated or High Fear zone triggers circuit breaker rules and overrides position sizing.",
-              source: "NSE India via yfinance (^INDIAVIX)",
-            }} />
+          <HelpPopover content={{
+            title: "India VIX — Volatility Index",
+            body: "India VIX (Volatility Index) is computed by NSE from Nifty50 option prices. It represents the market's expectation of volatility over the next 30 days. A VIX of 15 means the market expects 15% annualised volatility. It is often called the 'fear index' — it spikes when traders rush to buy put options for protection.",
+            level: "intermediate",
+            tips: [
+              "Below 13 = Complacency — markets are overconfident, be careful",
+              "13–18 = Normal — healthy trading environment",
+              "18–25 = Elevated — increased uncertainty, reduce position sizes",
+              "Above 25 = High Fear — circuit breaker mode, cash-only strategy",
+            ],
+            affectsVerdict: "VIX is the single most powerful circuit breaker trigger. VIX > 20 reduces all position sizes by 50%. VIX > 25 forces HOLD/cash-only mode.",
+            source: "NSE India VIX — computed from Nifty50 near and mid-month option strike premiums; fetched via yfinance ^INDIAVIX",
+          }} />
           </div>
 
           <div className="flex items-center gap-8 py-4">
