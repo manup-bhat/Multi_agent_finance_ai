@@ -1,78 +1,59 @@
 "use client";
 import { useState, useMemo } from "react";
+import useSWR from "swr";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, Area, CartesianGrid
+  Area, CartesianGrid,
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { HelpPopover } from "@/components/ui/help-popover";
-import { MOCK_PRICE_DATA, MOCK_FORECAST } from "@/lib/mock-data";
+import { useApp } from "@/lib/app-context";
+import { getPrediction } from "@/lib/api-client";
+import type { PredictResponse } from "@/lib/api-client";
 
-const TIMEFRAMES = ["1D", "1W", "1M", "3M", "6M", "1Y"] as const;
-const OVERLAYS = ["VWAP", "EMA20", "EMA50", "BB Bands", "Volume"] as const;
+const TIMEFRAMES = ["1W", "1M", "3M", "6M", "1Y"] as const;
 
-function calcEMA(data: { close: number }[], period: number): number[] {
+function calcEMA(prices: number[], period: number): number[] {
   const k = 2 / (period + 1);
-  const ema: number[] = [];
-  data.forEach((d, i) => {
-    if (i === 0) { ema.push(d.close); return; }
-    ema.push(d.close * k + ema[i - 1] * (1 - k));
-  });
-  return ema;
+  return prices.reduce<number[]>((acc, price, i) => {
+    acc.push(i === 0 ? price : price * k + acc[i - 1] * (1 - k));
+    return acc;
+  }, []);
 }
 
-// Custom candlestick bar shape
-function CandlestickBar(props: {
-  x?: number; y?: number; width?: number; height?: number;
-  open?: number; close?: number; high?: number; low?: number;
-  yAxisMap?: Record<string, { scale: (v: number) => number }>;
-  payload?: { open: number; close: number; high: number; low: number };
+function ChartTooltip({ active, payload }: {
+  active?: boolean;
+  payload?: Array<{ payload: { date: string; open?: number; high?: number; low?: number; close?: number; volume?: number } }>;
 }) {
-  const { x = 0, width = 8, payload, yAxisMap } = props;
-  if (!payload || !yAxisMap) return null;
-  const { open, close, high, low } = payload;
-  const scale = yAxisMap["0"]?.scale;
-  if (!scale) return null;
-
-  const bullish = close >= open;
-  const color = bullish ? "#059669" : "#DC2626";
-  const bodyTop = scale(Math.max(open, close));
-  const bodyBottom = scale(Math.min(open, close));
-  const wickTop = scale(high);
-  const wickBottom = scale(low);
-  const bodyH = Math.max(1, bodyBottom - bodyTop);
-  const cx = x + width / 2;
-
-  return (
-    <g>
-      {/* Wick */}
-      <line x1={cx} y1={wickTop} x2={cx} y2={wickBottom} stroke={color} strokeWidth={1} />
-      {/* Body */}
-      <rect x={x + 1} y={bodyTop} width={width - 2} height={bodyH} fill={color} rx={1} />
-    </g>
-  );
-}
-
-// Tooltip
-function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { date: string; open: number; high: number; low: number; close: number; volume: number } }> }) {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d) return null;
-  const bullish = d.close >= d.open;
+  const bullish = (d.close ?? 0) >= (d.open ?? 0);
   return (
     <div className="bg-surface border border-border rounded-card p-3 shadow-elevated text-xs">
       <div className="font-medium text-text-primary mb-1">{d.date}</div>
       <div className="space-y-0.5">
-        <div className="flex gap-3">
-          <span className="text-text-muted">O</span><span className="text-text-primary tabular-nums">₹{d.open?.toFixed(2)}</span>
-          <span className="text-text-muted">H</span><span className="text-bullish-green tabular-nums">₹{d.high?.toFixed(2)}</span>
-        </div>
-        <div className="flex gap-3">
-          <span className="text-text-muted">L</span><span className="text-bearish-red tabular-nums">₹{d.low?.toFixed(2)}</span>
-          <span className="text-text-muted">C</span>
-          <span className={cn("tabular-nums font-medium", bullish ? "text-bullish-green" : "text-bearish-red")}>₹{d.close?.toFixed(2)}</span>
-        </div>
-        <div className="text-text-muted">Vol: {(d.volume / 1_000_000).toFixed(1)}M</div>
+        {d.open != null && (
+          <div className="flex gap-3">
+            <span className="text-text-muted">O</span>
+            <span className="text-text-primary tabular-nums">₹{d.open.toFixed(2)}</span>
+            <span className="text-text-muted">H</span>
+            <span className="text-bullish-green tabular-nums">₹{d.high?.toFixed(2)}</span>
+          </div>
+        )}
+        {d.low != null && (
+          <div className="flex gap-3">
+            <span className="text-text-muted">L</span>
+            <span className="text-bearish-red tabular-nums">₹{d.low.toFixed(2)}</span>
+            <span className="text-text-muted">C</span>
+            <span className={cn("tabular-nums font-medium", bullish ? "text-bullish-green" : "text-bearish-red")}>
+              ₹{d.close?.toFixed(2)}
+            </span>
+          </div>
+        )}
+        {d.volume != null && d.volume > 0 && (
+          <div className="text-text-muted">Vol: {(d.volume / 1_000_000).toFixed(1)}M</div>
+        )}
       </div>
     </div>
   );
@@ -80,43 +61,88 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
 
 export function PriceChart() {
   const [timeframe, setTimeframe] = useState<typeof TIMEFRAMES[number]>("3M");
-  const [activeOverlays, setActiveOverlays] = useState<Set<string>>(new Set(["EMA20", "Volume"]));
+  const [showEMA20, setShowEMA20] = useState(true);
+  const [showEMA50, setShowEMA50] = useState(false);
 
-  const toggleOverlay = (o: string) => {
-    setActiveOverlays((prev) => {
-      const next = new Set(prev);
-      next.has(o) ? next.delete(o) : next.add(o);
-      return next;
+  const { selectedTicker, analysisData, horizon } = useApp();
+
+  // Fetch real prediction for forecast band
+  const { data: prediction } = useSWR<PredictResponse>(
+    analysisData ? `predict-${selectedTicker}-${horizon}` : null,
+    () => getPrediction(selectedTicker, horizon),
+    { revalidateOnFocus: false, shouldRetryOnError: false }
+  );
+
+  const forecastBand = useMemo(() => {
+    if (!prediction || prediction.p10 == null || prediction.p90 == null || prediction.p50 == null) return [];
+    const today = new Date();
+    return Array.from({ length: horizon }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i + 1);
+      return {
+        date: d.toISOString().split("T")[0],
+        p10: prediction.p10!,
+        p50: prediction.p50!,
+        p90: prediction.p90!,
+        isForecast: true,
+      };
     });
-  };
+  }, [prediction, horizon]);
 
-  const daysMap: Record<typeof TIMEFRAMES[number], number> = {
-    "1D": 1, "1W": 5, "1M": 22, "3M": 60, "6M": 130, "1Y": 252
-  };
-  const days = daysMap[timeframe];
+  // Without a dedicated price history endpoint, display a placeholder message
+  // showing the forecast band and key stats from the analysis response
+  const placeholderData = useMemo(() => {
+    if (!analysisData) return [];
+    const base = analysisData.price_target_p50 ?? 0;
+    if (base === 0) return [];
+    const today = new Date();
+    // Create a minimal 2-point placeholder to anchor the chart when no price history endpoint exists
+    return [
+      {
+        date: new Date(today.getTime() - 86400000 * 5).toISOString().split("T")[0],
+        close: base,
+        open: base,
+        high: base,
+        low: base,
+        volume: 0,
+      },
+      {
+        date: today.toISOString().split("T")[0],
+        close: base,
+        open: base,
+        high: base,
+        low: base,
+        volume: 0,
+      },
+    ];
+  }, [analysisData]);
 
-  const chartData = useMemo(() => {
-    const slice = MOCK_PRICE_DATA.slice(-Math.min(days, MOCK_PRICE_DATA.length));
-    const ema20 = calcEMA(slice, 20);
-    const ema50 = calcEMA(slice, 50);
-    return slice.map((d, i) => ({
+  const combined = useMemo(() => {
+    const hist = placeholderData.map((d, i) => ({
       ...d,
-      ema20: +ema20[i].toFixed(2),
-      ema50: +ema50[i].toFixed(2),
+      ema20: calcEMA(placeholderData.map((x) => x.close), 20)[i],
+      ema50: calcEMA(placeholderData.map((x) => x.close), 50)[i],
     }));
-  }, [days]);
+    return [...hist, ...forecastBand];
+  }, [placeholderData, forecastBand]);
 
-  // Forecast data — append to end
-  const forecastData = useMemo(() => MOCK_FORECAST.map((f) => ({
-    date: f.date,
-    open: f.p50, high: f.p90, low: f.p10, close: f.p50,
-    volume: 0,
-    p10: f.p10, p50: f.p50, p90: f.p90,
-    isForecast: true,
-  })), []);
+  const priceMin = useMemo(() => {
+    const vals = combined.flatMap((d) => [
+      d.low ?? d.close ?? d.p10 ?? Infinity,
+      d.p10 ?? Infinity,
+    ]).filter(isFinite);
+    return vals.length ? Math.min(...vals) * 0.995 : 0;
+  }, [combined]);
 
-  const priceMin = useMemo(() => Math.min(...chartData.map((d) => d.low)) * 0.995, [chartData]);
-  const priceMax = useMemo(() => Math.max(...chartData.map((d) => d.high)) * 1.005, [chartData]);
+  const priceMax = useMemo(() => {
+    const vals = combined.flatMap((d) => [
+      d.high ?? d.close ?? d.p90 ?? 0,
+      d.p90 ?? 0,
+    ]).filter((v) => v > 0);
+    return vals.length ? Math.max(...vals) * 1.005 : 1;
+  }, [combined]);
+
+  const noData = combined.length === 0;
 
   return (
     <div className="card-base p-5">
@@ -125,10 +151,10 @@ export function PriceChart() {
           <h3 className="text-base font-semibold text-text-primary">Price Chart</h3>
           <HelpPopover
             content={{
-              title: "Price Chart — OHLCV",
-              body: "Interactive candlestick chart showing Open, High, Low, Close prices with volume. The saffron shaded region ahead shows the AI forecast confidence band (P10–P90).",
-              affectsVerdict: "Price action relative to EMA20/EMA50 and volume confirmation directly influence the Quant Agent's technical score.",
-              source: "NSE India via yfinance — 1-minute aggregated to daily OHLCV",
+              title: "Price Chart — AI Forecast",
+              body: "The saffron band shows the AI forecast confidence range (P10–P90) for the selected horizon. Historical OHLCV requires a dedicated price endpoint.",
+              affectsVerdict: "Price action relative to EMA20/EMA50 influences the Quant Agent's technical score.",
+              source: "Predictions: XGBoost/LightGBM/CatBoost + Chronos-2 ensemble",
             }}
           />
         </div>
@@ -150,96 +176,91 @@ export function PriceChart() {
         </div>
       </div>
 
-      {/* Main chart */}
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, #E2E8F0)" opacity={0.4} />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10, fill: "#94A3B8" }}
-              tickLine={false}
-              axisLine={false}
-              interval={Math.floor(chartData.length / 6)}
-              tickFormatter={(v) => {
-                const d = new Date(v);
-                return `${d.getDate()}/${d.getMonth() + 1}`;
-              }}
-            />
-            <YAxis
-              yAxisId="0"
-              domain={[priceMin, priceMax]}
-              tick={{ fontSize: 10, fill: "#94A3B8" }}
-              tickLine={false}
-              axisLine={false}
-              width={60}
-              tickFormatter={(v) => `₹${v.toFixed(0)}`}
-            />
-            <Tooltip content={<ChartTooltip />} />
-
-            {/* Forecast confidence band */}
-            <Area
-              data={forecastData}
-              dataKey="p90"
-              stroke="none"
-              fill="#FF6B00"
-              fillOpacity={0.08}
-              yAxisId="0"
-            />
-
-            {/* Candlestick bars */}
-            <Bar dataKey="close" yAxisId="0" shape={<CandlestickBar />} isAnimationActive={false} />
-
-            {/* EMA20 */}
-            {activeOverlays.has("EMA20") && (
-              <Line
-                yAxisId="0"
-                type="monotone"
-                dataKey="ema20"
-                stroke="#FF6B00"
-                strokeWidth={1.5}
-                dot={false}
-                name="EMA20"
-              />
-            )}
-            {/* EMA50 */}
-            {activeOverlays.has("EMA50") && (
-              <Line
-                yAxisId="0"
-                type="monotone"
-                dataKey="ema50"
-                stroke="#1D4ED8"
-                strokeWidth={1.5}
-                dot={false}
-                name="EMA50"
-                strokeDasharray="4 2"
-              />
-            )}
-
-            {/* Forecast P50 dashed line */}
-            <Line
-              data={forecastData}
-              yAxisId="0"
-              type="monotone"
-              dataKey="p50"
-              stroke="#FF6B00"
-              strokeWidth={2}
-              strokeDasharray="5 3"
-              dot={false}
-              name="Forecast"
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Volume bars */}
-      {activeOverlays.has("Volume") && (
-        <div className="h-14 w-full mt-1 border-t border-border pt-1">
+      {noData ? (
+        <div className="h-64 flex items-center justify-center">
+          <p className="text-sm text-text-muted text-center">
+            Run analysis to generate AI forecast band.
+          </p>
+        </div>
+      ) : (
+        <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
-              <XAxis dataKey="date" hide />
-              <YAxis yAxisId="0" hide />
-              <Bar yAxisId="0" dataKey="volume" fill="#64748B" opacity={0.4} isAnimationActive={false} />
+            <ComposedChart data={combined} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, #E2E8F0)" opacity={0.4} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: "#94A3B8" }}
+                tickLine={false}
+                axisLine={false}
+                interval={Math.max(0, Math.floor(combined.length / 6))}
+                tickFormatter={(v) => {
+                  const d = new Date(v);
+                  return `${d.getDate()}/${d.getMonth() + 1}`;
+                }}
+              />
+              <YAxis
+                yAxisId="0"
+                domain={[priceMin, priceMax]}
+                tick={{ fontSize: 10, fill: "#94A3B8" }}
+                tickLine={false}
+                axisLine={false}
+                width={65}
+                tickFormatter={(v) => `₹${v.toFixed(0)}`}
+              />
+              <Tooltip content={<ChartTooltip />} />
+
+              {/* Forecast confidence band */}
+              <Area
+                yAxisId="0"
+                data={forecastBand}
+                dataKey="p90"
+                stroke="none"
+                fill="#FF6B00"
+                fillOpacity={0.1}
+              />
+              <Area
+                yAxisId="0"
+                data={forecastBand}
+                dataKey="p10"
+                stroke="none"
+                fill="#ffffff"
+                fillOpacity={1}
+              />
+
+              {/* Historical close line */}
+              <Line
+                yAxisId="0"
+                type="monotone"
+                dataKey="close"
+                stroke="#64748B"
+                strokeWidth={2}
+                dot={false}
+                name="Close"
+                connectNulls={false}
+              />
+
+              {/* EMAs */}
+              {showEMA20 && (
+                <Line yAxisId="0" type="monotone" dataKey="ema20"
+                  stroke="#FF6B00" strokeWidth={1.5} dot={false} name="EMA20" />
+              )}
+              {showEMA50 && (
+                <Line yAxisId="0" type="monotone" dataKey="ema50"
+                  stroke="#1D4ED8" strokeWidth={1.5} dot={false} name="EMA50" strokeDasharray="4 2" />
+              )}
+
+              {/* Forecast P50 */}
+              <Line
+                yAxisId="0"
+                data={forecastBand}
+                type="monotone"
+                dataKey="p50"
+                stroke="#FF6B00"
+                strokeWidth={2}
+                strokeDasharray="5 3"
+                dot={false}
+                name="Forecast P50"
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -247,24 +268,43 @@ export function PriceChart() {
 
       {/* Overlay toggles */}
       <div className="flex gap-2 mt-3 flex-wrap">
-        {OVERLAYS.map((o) => (
+        {[
+          { label: "EMA20", active: showEMA20, toggle: () => setShowEMA20((v) => !v) },
+          { label: "EMA50", active: showEMA50, toggle: () => setShowEMA50((v) => !v) },
+        ].map(({ label, active, toggle }) => (
           <button
-            key={o}
-            onClick={() => toggleOverlay(o)}
+            key={label}
+            onClick={toggle}
             className={cn(
               "px-2.5 py-1 text-xs rounded-badge border font-medium transition-all duration-150",
-              activeOverlays.has(o)
+              active
                 ? "bg-saffron-light text-saffron border-saffron/30"
                 : "border-border text-text-muted hover:text-text-primary hover:bg-surface-raised"
             )}
           >
-            {o}
+            {label}
           </button>
         ))}
-        <span className="text-xs text-text-muted self-center ml-1">
-          Saffron band = AI forecast (P10–P90)
-        </span>
+        {forecastBand.length > 0 && (
+          <span className="text-xs text-text-muted self-center ml-1">
+            Saffron band = AI forecast P10–P90 ({horizon}-day)
+          </span>
+        )}
       </div>
+
+      {/* Prediction summary if available */}
+      {prediction && (
+        <div className="mt-3 p-3 bg-surface-raised rounded-btn text-xs text-text-secondary">
+          <span className="font-medium text-text-primary">{prediction.direction}</span>
+          {" "}— {(prediction.confidence * 100).toFixed(1)}% confidence
+          {" "}via {prediction.model_used}
+          {prediction.p50 != null && (
+            <> — P50 target: <span className="tabular-nums font-medium">
+              ₹{prediction.p50.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+            </span></>
+          )}
+        </div>
+      )}
     </div>
   );
 }

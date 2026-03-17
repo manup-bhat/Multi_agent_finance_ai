@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { Play, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
-import { analyzeStock } from "@/lib/api-client";
+import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 
 const STAGES = [
@@ -15,7 +15,7 @@ const STAGES = [
 ];
 
 export function AnalyzeCard() {
-  const { selectedTicker, setAnalysisData, isAnalyzing, setIsAnalyzing, analysisStage, setAnalysisStage, horizon, setHorizon, includeFO, setIncludeFO, addNotification } = useApp();
+  const { selectedTicker, setAnalysisData, isAnalyzing, setIsAnalyzing, analysisStage, setAnalysisStage, horizon, setHorizon, includeFno, setIncludeFno, includeSentiment, setIncludeSentiment, addNotification } = useApp();
   const [progress, setProgress] = useState(0);
   const [lastRun, setLastRun] = useState<Date | null>(new Date(Date.now() - 2 * 60000));
   const [timeRemaining, setTimeRemaining] = useState(28);
@@ -43,12 +43,15 @@ export function AnalyzeCard() {
     setIsAnalyzing(true);
     setProgress(0);
     try {
-      const data = await analyzeStock(selectedTicker, horizon, includeFO);
+      const data = await analyzeStock(selectedTicker, horizon, includeFno, includeSentiment);
       setAnalysisData(data);
       setLastRun(new Date());
       addNotification({ type: "success", message: `${selectedTicker} analysis complete — ${data.verdict} signal` });
-    } catch {
-      addNotification({ type: "error", message: `Analysis failed — using cached data` });
+      if (data.warnings.length > 0) {
+        addNotification({ type: "warning", message: data.warnings[0] });
+      }
+    } catch (err) {
+      addNotification({ type: "error", message: getApiErrorMessage(err) });
     } finally {
       setIsAnalyzing(false);
       setProgress(100);
@@ -102,16 +105,16 @@ export function AnalyzeCard() {
           {/* Include F&O toggle */}
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <div
-              onClick={() => setIncludeFO(!includeFO)}
+              onClick={() => setIncludeFno(!includeFno)}
               className={cn(
                 "relative w-10 h-5 rounded-pill transition-colors duration-150",
-                includeFO ? "bg-saffron" : "bg-border"
+                includeFno ? "bg-saffron" : "bg-border"
               )}
             >
               <span
                 className={cn(
                   "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150",
-                  includeFO ? "left-5" : "left-0.5"
+                  includeFno ? "left-5" : "left-0.5"
                 )}
               />
             </div>

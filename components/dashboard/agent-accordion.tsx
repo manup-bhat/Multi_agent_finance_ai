@@ -2,16 +2,57 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SentimentBadge } from "@/components/ui/badge";
 import { HelpPopover } from "@/components/ui/help-popover";
 import { useApp } from "@/lib/app-context";
+import type { AnalyzeResponse } from "@/lib/api-client";
+
+type AgentEntry = {
+  id: string;
+  label: string;
+  summary: string;
+};
+
+function buildAgentEntries(data: AnalyzeResponse): AgentEntry[] {
+  return [
+    {
+      id: "quant",
+      label: "Quant Agent",
+      summary: data.quant_summary,
+    },
+    {
+      id: "macro",
+      label: "Macro Agent",
+      summary: data.macro_summary,
+    },
+    {
+      id: "emotion",
+      label: "Sentiment / Emotion",
+      summary: data.emotion_summary,
+    },
+    {
+      id: "fno",
+      label: "F&O Agent",
+      summary: data.fno_summary,
+    },
+    ...(data.recommended_strategy
+      ? [
+          {
+            id: "strategy",
+            label: "Recommended Strategy",
+            summary: data.recommended_strategy,
+          },
+        ]
+      : []),
+  ].filter((e) => e.summary && e.summary !== "");
+}
 
 export function AgentAccordion() {
   const { analysisData } = useApp();
   const [openId, setOpenId] = useState<string | null>(null);
 
   if (!analysisData) return null;
-  const { agents } = analysisData;
+
+  const agents = buildAgentEntries(analysisData);
 
   return (
     <div className="card-base">
@@ -24,9 +65,9 @@ export function AgentAccordion() {
           <HelpPopover
             content={{
               title: "AI Agent Reports — Multi-Agent Analysis",
-              body: "Each agent independently analyzes a different dimension of the market: technical, macro, fundamental, prediction, emotion, F&O, and contrarian. Their weighted conclusions form the final verdict.",
-              affectsVerdict: "Agent sentiments are weighted and synthesized by the orchestrator to produce the final verdict. Devil's Advocate can reduce confidence even in bullish scenarios.",
-              source: "Groq 70B / Groq 8B / Gemini Pro / Local LLM via LangGraph",
+              body: "Each agent independently analyzes a different dimension: technical, macro, sentiment, F&O. Their weighted conclusions form the final verdict.",
+              affectsVerdict: "Agent summaries are synthesized by the orchestrator to produce the final verdict and confidence score.",
+              source: "LangGraph multi-agent workflow — Groq / Gemini / local LLM",
             }}
           />
         </div>
@@ -42,34 +83,27 @@ export function AgentAccordion() {
                 className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-surface-raised transition-colors duration-150 text-left"
                 aria-expanded={isOpen}
               >
-                {/* Icon */}
-                <span className="text-lg w-7 flex-shrink-0">{agent.icon}</span>
-
-                {/* Name */}
                 <div className="w-36 flex-shrink-0">
-                  <div className="text-sm font-medium text-text-primary">{agent.name}</div>
+                  <div className="text-sm font-medium text-text-primary">{agent.label}</div>
                 </div>
 
-                {/* Summary */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-text-secondary truncate">{agent.summary}</p>
                 </div>
 
-                {/* Sentiment + chevron */}
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <SentimentBadge sentiment={agent.sentiment} />
                   {isOpen
                     ? <ChevronDown size={14} className="text-text-muted" />
-                    : <ChevronRight size={14} className="text-text-muted" />
-                  }
+                    : <ChevronRight size={14} className="text-text-muted" />}
                 </div>
               </button>
 
-              {/* Expanded content */}
               {isOpen && (
                 <div className="px-5 pb-5 bg-surface-raised/50 border-t border-border">
-                  <div className="pt-4 prose prose-sm max-w-none">
-                    <AgentMarkdown text={agent.full_report} />
+                  <div className="pt-4">
+                    <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
+                      {agent.summary}
+                    </p>
                   </div>
                 </div>
               )}
@@ -77,36 +111,21 @@ export function AgentAccordion() {
           );
         })}
       </div>
-    </div>
-  );
-}
 
-// Simple markdown renderer for bold/bullet
-function AgentMarkdown({ text }: { text: string }) {
-  const lines = text.split("\n");
-  return (
-    <div className="space-y-1.5 text-xs text-text-secondary leading-relaxed">
-      {lines.map((line, i) => {
-        if (!line.trim()) return <div key={i} className="h-1" />;
-        if (line.startsWith("**") && line.endsWith("**")) {
-          return (
-            <h4 key={i} className="font-semibold text-text-primary text-sm">
-              {line.replace(/\*\*/g, "")}
-            </h4>
-          );
-        }
-        // Bold inline **text**
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
-        return (
-          <p key={i} className="text-xs text-text-secondary">
-            {parts.map((part, j) =>
-              part.startsWith("**") && part.endsWith("**")
-                ? <strong key={j} className="text-text-primary font-semibold">{part.replace(/\*\*/g, "")}</strong>
-                : <span key={j}>{part}</span>
-            )}
-          </p>
-        );
-      })}
+      {/* Key risks footer */}
+      {analysisData.key_risks.length > 0 && (
+        <div className="px-5 py-4 border-t border-border bg-surface-raised/30">
+          <div className="text-xs font-medium text-text-muted uppercase tracking-widest mb-2">Key Risks Identified</div>
+          <ul className="space-y-1">
+            {analysisData.key_risks.map((risk, i) => (
+              <li key={i} className="text-xs text-text-secondary flex gap-2">
+                <span className="text-warning-amber flex-shrink-0 mt-0.5">•</span>
+                <span>{risk}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

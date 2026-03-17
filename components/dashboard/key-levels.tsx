@@ -7,22 +7,35 @@ export function KeyLevels() {
   const { analysisData } = useApp();
   if (!analysisData) return null;
 
-  const price = analysisData.current_price;
+  const { price_target_p10, price_target_p50, price_target_p90, quant_summary } = analysisData;
 
-  // Derived S/R levels
+  if (price_target_p50 == null) {
+    return (
+      <div className="card-base p-5">
+        <h3 className="text-base font-semibold text-text-primary mb-2">Key Price Levels</h3>
+        <p className="text-sm text-text-muted">Price target data unavailable.</p>
+        {quant_summary && (
+          <p className="text-xs text-text-secondary mt-3 p-3 bg-surface-raised rounded-btn leading-relaxed">
+            {quant_summary}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const price = price_target_p50;
+  const p10 = price_target_p10 ?? price * 0.97;
+  const p90 = price_target_p90 ?? price * 1.03;
+
   const levels = [
-    { label: "R3", value: price * 1.055, type: "resistance" },
-    { label: "R2", value: price * 1.035, type: "resistance" },
-    { label: "R1", value: price * 1.018, type: "resistance" },
-    { label: "ATM", value: price, type: "current" },
-    { label: "S1", value: price * 0.982, type: "support" },
-    { label: "S2", value: price * 0.965, type: "support" },
-    { label: "S3", value: price * 0.948, type: "support" },
+    { label: "P90 Bull", value: p90, type: "resistance" as const },
+    { label: "P50 Base", value: price, type: "current" as const },
+    { label: "P10 Bear", value: p10, type: "support" as const },
   ];
 
-  const maxVal = levels[0].value;
-  const minVal = levels[levels.length - 1].value;
-  const range = maxVal - minVal;
+  const maxVal = p90;
+  const minVal = p10;
+  const range = Math.max(maxVal - minVal, 1);
 
   return (
     <div className="card-base p-5">
@@ -30,15 +43,14 @@ export function KeyLevels() {
         <h3 className="text-base font-semibold text-text-primary">Key Price Levels</h3>
         <HelpPopover
           content={{
-            title: "Key Price Levels — Support & Resistance",
-            body: "Support and resistance levels computed from pivot points, SMC order blocks, and option chain max pain. These are key decision zones.",
-            affectsVerdict: "Price proximity to max pain and strong S/R levels influences the F&O agent's strategy recommendation and the overall risk assessment.",
-            source: "NSE F&O data + pivot calculations + SMC analysis engine",
+            title: "AI Price Targets — P10 / P50 / P90",
+            body: "Probabilistic price targets from the Chronos-2 + ensemble model. P10 = bear scenario, P50 = base target, P90 = bull scenario.",
+            affectsVerdict: "The P50 target is the primary price objective. A narrow P10–P90 band indicates high confidence.",
+            source: "Amazon Chronos-2 pretrained model with India-specific covariates",
           }}
         />
       </div>
 
-      {/* Price ladder */}
       <div className="space-y-1.5">
         {levels.map(({ label, value, type }) => {
           const pct = ((value - minVal) / range) * 100;
@@ -48,12 +60,9 @@ export function KeyLevels() {
               key={label}
               className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-btn",
-                isCurrent
-                  ? "bg-saffron-light border border-saffron/30"
-                  : "hover:bg-surface-raised"
+                isCurrent ? "bg-saffron-light border border-saffron/30" : "hover:bg-surface-raised"
               )}
             >
-              {/* Bar indicator */}
               <div className="w-16 h-1.5 bg-surface-raised rounded-pill overflow-hidden flex-shrink-0">
                 <div
                   className={cn(
@@ -66,7 +75,7 @@ export function KeyLevels() {
               </div>
 
               <span className={cn(
-                "text-xs font-bold w-8 flex-shrink-0",
+                "text-xs font-bold w-16 flex-shrink-0",
                 type === "resistance" ? "text-bearish-red" :
                 isCurrent ? "text-saffron" : "text-bullish-green"
               )}>
@@ -77,29 +86,24 @@ export function KeyLevels() {
                 "text-sm font-medium tabular-nums flex-1 text-right",
                 isCurrent ? "text-saffron font-bold" : "text-text-primary"
               )}>
-                ₹{value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                ₹{value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
               </span>
             </div>
           );
         })}
       </div>
 
-      {/* Max Pain + SMC */}
-      <div className="mt-4 pt-3 border-t border-border space-y-1">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-text-muted">Max Pain</span>
-          <span className="font-medium text-text-primary tabular-nums">₹22,000</span>
+      {/* Quant summary */}
+      {quant_summary && (
+        <div className="mt-4 pt-3 border-t border-border">
+          <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+            Quant Summary
+          </div>
+          <p className="text-xs text-text-secondary leading-relaxed p-3 bg-surface-raised rounded-btn">
+            {quant_summary}
+          </p>
         </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-text-muted">Days to Expiry</span>
-          <span className="font-medium text-warning-amber">3 DTE</span>
-        </div>
-        <div className="mt-2 px-3 py-2 rounded-btn bg-bullish-bg border border-bullish-green/20">
-          <span className="text-xs text-bullish-green font-medium">
-            SMC Order Block: ₹{(price * 0.971).toFixed(0)} – ₹{(price * 0.977).toFixed(0)}
-          </span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

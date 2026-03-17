@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useState, useCallback, ReactNode } from "react";
-import { MOCK_ANALYSIS } from "./mock-data";
+import type { AnalyzeResponse } from "./api-client";
 
 export type Notification = {
   id: string;
@@ -12,8 +12,8 @@ export type Notification = {
 type AppState = {
   selectedTicker: string;
   setSelectedTicker: (t: string) => void;
-  analysisData: typeof MOCK_ANALYSIS | null;
-  setAnalysisData: (d: typeof MOCK_ANALYSIS | null) => void;
+  analysisData: AnalyzeResponse | null;
+  setAnalysisData: (d: AnalyzeResponse | null) => void;
   isAnalyzing: boolean;
   setIsAnalyzing: (v: boolean) => void;
   analysisStage: number;
@@ -25,25 +25,28 @@ type AppState = {
   removeNotification: (id: string) => void;
   horizon: number;
   setHorizon: (h: number) => void;
-  includeFO: boolean;
-  setIncludeFO: (v: boolean) => void;
+  includeFno: boolean;
+  setIncludeFno: (v: boolean) => void;
+  includeSentiment: boolean;
+  setIncludeSentiment: (v: boolean) => void;
 };
 
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedTicker, setSelectedTicker] = useState("RELIANCE.NS");
-  const [analysisData, setAnalysisData] = useState<typeof MOCK_ANALYSIS | null>(MOCK_ANALYSIS);
+  const [analysisData, setAnalysisData] = useState<AnalyzeResponse | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStage, setAnalysisStage] = useState(0);
   const [apiConnected, setApiConnected] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { id: "1", type: "success", message: "RELIANCE.NS analysis complete — BUY signal", timestamp: new Date() },
-    { id: "2", type: "warning", message: "FII selling streak alert — 3 days", timestamp: new Date() },
-    { id: "3", type: "info", message: "India VIX: 14.2 — Normal regime", timestamp: new Date() },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [horizon, setHorizon] = useState(5);
-  const [includeFO, setIncludeFO] = useState(false);
+  const [includeFno, setIncludeFno] = useState(true);
+  const [includeSentiment, setIncludeSentiment] = useState(true);
+
+  const removeNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
 
   const addNotification = useCallback((n: Omit<Notification, "id" | "timestamp">) => {
     const notification: Notification = {
@@ -52,13 +55,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       timestamp: new Date(),
     };
     setNotifications((prev) => [notification, ...prev].slice(0, 10));
-    // Auto dismiss after 5s
-    setTimeout(() => removeNotification(notification.id), 5000);
-  }, []);
-
-  const removeNotification = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }, []);
+    setTimeout(() => removeNotification(notification.id), 6000);
+  }, [removeNotification]);
 
   return (
     <AppContext.Provider
@@ -78,8 +76,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeNotification,
         horizon,
         setHorizon,
-        includeFO,
-        setIncludeFO,
+        includeFno,
+        setIncludeFno,
+        includeSentiment,
+        setIncludeSentiment,
       }}
     >
       {children}
