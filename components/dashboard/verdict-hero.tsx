@@ -45,9 +45,17 @@ export function VerdictHero() {
         <HelpPopover
           content={{
             title: "AI Verdict — Final Signal",
-            body: "The verdict is a weighted synthesis of multi-agent LLM analysis and ML model ensemble. Confidence reflects ensemble agreement. Regime is determined by market structure.",
-            affectsVerdict: "Verdict directly represents the recommended trade direction. Circuit breaker overrides all signals to HOLD when VIX exceeds threshold.",
-            source: "Multi-agent LangGraph synthesis + XGBoost/LightGBM/CatBoost ensemble",
+            body: "The verdict is produced by a 9-agent LangGraph pipeline: Preflight, Quant, Macro, Sentiment, F&O, Risk, Synthesis, Narrator, and Postflight. Each agent independently scores its domain. The orchestrator combines their outputs with ML ensemble probabilities (XGBoost + LightGBM + CatBoost) to produce a final verdict and confidence score.",
+            level: "intermediate",
+            tips: [
+              "STRONG BUY = 70%+ upside probability, strong multi-agent consensus",
+              "BUY = 55–70% upside probability, positive but mixed signals",
+              "HOLD = 45–55%, no strong directional edge",
+              "SELL / STRONG SELL = bearish signals dominate",
+              "Circuit Breaker Active = forced HOLD due to VIX or FII conditions",
+            ],
+            affectsVerdict: "The confidence ring shows what percentage of the ensemble agrees on the direction. Below 50% confidence = HOLD. Circuit breaker overrides all agent verdicts.",
+            source: "LangGraph 9-agent orchestration → Groq/Gemini LLM synthesis → XGBoost/LightGBM/CatBoost ensemble probabilities",
           }}
         />
       </div>

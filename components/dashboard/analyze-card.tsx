@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import { Play, ChevronDown } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Play, ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
@@ -17,15 +17,39 @@ const STAGES = [
 ];
 
 export function AnalyzeCard() {
-  const { selectedTicker, setAnalysisData, isAnalyzing, setIsAnalyzing, analysisStage, setAnalysisStage, horizon, setHorizon, includeFno, setIncludeFno, includeSentiment, setIncludeSentiment, addNotification } = useApp();
+  const { selectedTicker, setSelectedTicker, setAnalysisData, isAnalyzing, setIsAnalyzing, analysisStage, setAnalysisStage, horizon, setHorizon, includeFno, setIncludeFno, includeSentiment, setIncludeSentiment, addNotification } = useApp();
   const [progress, setProgress] = useState(0);
   const [lastRun, setLastRun] = useState<Date | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(28);
+  const [tickerInput, setTickerInput] = useState(selectedTicker.replace(".NS", ""));
+  const [showDropdown, setShowDropdown] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync input when selectedTicker changes externally (e.g. EmptyState click)
+  useEffect(() => {
+    setTickerInput(selectedTicker.replace(".NS", ""));
+  }, [selectedTicker]);
 
   const tickerMeta = useMemo(
     () => NSE_TICKERS.find((t) => t.symbol === selectedTicker),
     [selectedTicker]
   );
+
+  const filteredTickers = useMemo(() => {
+    const q = tickerInput.toUpperCase().trim();
+    if (!q) return NSE_TICKERS.slice(0, 8);
+    return NSE_TICKERS.filter(
+      (t) => t.symbol.includes(q) || t.name.toUpperCase().includes(q)
+    ).slice(0, 6);
+  }, [tickerInput]);
+
+  function commitTicker(raw: string) {
+    const sym = raw.toUpperCase().trim();
+    const full = sym.endsWith(".NS") ? sym : sym + ".NS";
+    setSelectedTicker(full);
+    setTickerInput(sym.replace(".NS", ""));
+    setShowDropdown(false);
+  }
 
   useEffect(() => {
     if (!isAnalyzing) return;
@@ -78,17 +102,67 @@ export function AnalyzeCard() {
   return (
     <div className="card-base p-5 border-t-4 border-t-saffron">
       <div className="flex flex-wrap items-center gap-4">
-        {/* Left: Ticker + Help */}
+        {/* Left: Ticker input + Help */}
         <div className="min-w-0 flex items-start gap-2">
-          <div>
-            <div className="text-2xl font-bold text-text-primary tabular-nums">{selectedTicker.replace(".NS", "")}</div>
-            <div className="text-sm text-text-muted mt-0.5">
-              {tickerMeta?.name ?? "NSE Listed Security"}{tickerMeta?.sector ? ` · ${tickerMeta.sector}` : ""}
+          <div className="min-w-0">
+            {/* Ticker search input */}
+            <div className="relative">
+              <div className="flex items-center gap-1.5 border border-border bg-surface-raised rounded-card px-3 py-2 focus-within:border-saffron/50 transition-colors duration-150">
+                <Search size={14} className="text-text-muted flex-shrink-0" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={tickerInput}
+                  onChange={(e) => {
+                    setTickerInput(e.target.value.toUpperCase());
+                    setShowDropdown(true);
+                  }}
+                  onFocus={() => setShowDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitTicker(tickerInput);
+                    if (e.key === "Escape") setShowDropdown(false);
+                  }}
+                  placeholder="RELIANCE, TCS…"
+                  className="bg-transparent text-base font-bold text-text-primary placeholder:text-text-muted focus:outline-none w-36"
+                  aria-label="Stock ticker symbol"
+                  aria-autocomplete="list"
+                  disabled={isAnalyzing}
+                />
+              </div>
+
+              {/* Autocomplete dropdown */}
+              {showDropdown && filteredTickers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-72 bg-surface border border-border rounded-card shadow-elevated z-30 overflow-hidden">
+                  {filteredTickers.map((t) => (
+                    <button
+                      key={t.symbol}
+                      type="button"
+                      onMouseDown={() => commitTicker(t.symbol)}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-saffron-light hover:text-saffron transition-colors duration-100 text-left"
+                    >
+                      <span className="text-sm font-semibold text-text-primary">{t.symbol.replace(".NS", "")}</span>
+                      <span className="text-xs text-text-muted truncate ml-2 max-w-[160px]">{t.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-text-muted mt-1">
+              {tickerMeta?.name ?? "Type a NSE ticker + press Enter"}{tickerMeta?.sector ? ` · ${tickerMeta.sector}` : ""}
             </div>
           </div>
           <HelpPopover content={{
             title: "How the Analysis Works",
             body: "Clicking Run Analysis triggers a 9-agent LangGraph pipeline: (1) Pre-flight checks, (2) Market data fetch, (3) ML model predictions, (4) 9 AI agents reason in parallel, (5) Synthesis into a final verdict with confidence score.",
+            level: "beginner",
+            tips: [
+              "Typical analysis takes 20–35s depending on API load",
+              "Toggle F&O off to skip option chain (saves ~5s)",
+              "Toggle Sentiment off to skip news scraping (saves ~8s)",
+              "Custom tickers: type any NSE symbol e.g. WIPRO, LTIM, ADANIENT",
+            ],
             affectsVerdict: "Each agent contributes a weighted score. Macro, Technical, and ML signals each carry ~30% weight. Sentiment carries ~20%. F&O adjusts the final confidence.",
             source: "api/routes/analyze.py → LangGraph orchestration → 9-agent pipeline",
           }} />

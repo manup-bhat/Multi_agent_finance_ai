@@ -64,10 +64,18 @@ export function AgentAccordion() {
           </span>
           <HelpPopover
             content={{
-              title: "AI Agent Reports — Multi-Agent Analysis",
-              body: "Each agent independently analyzes a different dimension: technical, macro, sentiment, F&O. Their weighted conclusions form the final verdict.",
-              affectsVerdict: "Agent summaries are synthesized by the orchestrator to produce the final verdict and confidence score.",
-              source: "LangGraph multi-agent workflow — Groq / Gemini / local LLM",
+              title: "9-Agent LangGraph Pipeline Reports",
+              body: "The system runs 9 specialized AI agents in a directed graph (LangGraph). Each agent receives the same market data but is prompted to reason only about its domain — this separation of concerns prevents one strong signal from drowning out weaker but important warnings.",
+              level: "advanced",
+              tips: [
+                "Quant Agent: RSI, MACD, BB, EMA cross, volume surge, regime",
+                "Macro Agent: VIX, USD/INR, crude oil, SGX Nifty, FII/DII",
+                "Sentiment Agent: FinBERT news, GoEmotions, StockTwits, GDELT",
+                "F&O Agent: PCR, max pain, IV rank, participant OI, skew",
+                "Risk Agent: circuit breakers, key risk identification",
+              ],
+              affectsVerdict: "The Synthesis Agent reads all prior agent outputs and produces a final verdict. Each agent's output is weighted by its historical accuracy on NSE data.",
+              source: "LangGraph StateGraph → Groq (llama-3.3-70b) / Google Gemini Flash — agents/nodes/*.py",
             }}
           />
         </div>

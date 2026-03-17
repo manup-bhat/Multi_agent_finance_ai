@@ -26,10 +26,17 @@ export function SocialSentiment() {
         <h3 className="text-base font-semibold text-text-primary">Market Pulse</h3>
         <HelpPopover
           content={{
-            title: "Market Pulse — Social & News Sentiment",
-            body: "Aggregates sentiment from StockTwits retail posts, RSS financial news (FinBERT scored), and GDELT global macro event tones.",
-            affectsVerdict: "Elevated social volume with extreme greed triggers the Euphoria Warning, reducing conviction.",
-            source: "StockTwits API + RSS (ET/LiveMint/BS) via FinBERT + GDELT v2 API",
+            title: "Market Pulse — Sentiment Pipeline",
+            body: "Aggregates three sentiment signals: (1) StockTwits bullish/bearish community posts for the specific ticker, (2) RSS news headlines from ET/LiveMint/BusinessStandard run through FinBERT (financial BERT model), (3) GDELT global news event tone. Combined into the emotion_summary shown here.",
+            level: "intermediate",
+            tips: [
+              "FinBERT is fine-tuned on financial news — more accurate than general-purpose sentiment models",
+              "StockTwits skews retail; GDELT captures institutional narrative",
+              "Sentiment is most useful at extremes — ignore mild readings",
+              "Euphoria warning = social_bullish > 85% AND volume > 500 posts",
+            ],
+            affectsVerdict: "The Emotion Agent's score contributes to the Fear & Greed Index and can trigger the Euphoria flag, which caps the verdict at BUY (never STRONG BUY).",
+            source: "StockTwits API (ticker/{symbol}/messages) + ET/Mint/BS RSS → FinBERT-tone + GDELT v2 /api/v2/query",
           }}
         />
       </div>

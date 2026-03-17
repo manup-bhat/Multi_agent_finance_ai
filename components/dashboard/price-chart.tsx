@@ -89,23 +89,15 @@ export function PriceChart() {
     });
   }, [prediction, horizon]);
 
-  // Without a dedicated price history endpoint, display a placeholder message
-  // showing the forecast band and key stats from the analysis response
-  const placeholderData = useMemo(() => {
+  // No price history endpoint is implemented yet — chart shows only the AI forecast band
+  // anchored to the P50 price target. Historical OHLCV requires GET /price-history/{ticker}.
+  const anchorData = useMemo(() => {
     if (!analysisData) return [];
-    const base = analysisData.price_target_p50 ?? 0;
-    if (base === 0) return [];
+    const base = analysisData.price_target_p50;
+    if (base == null || base === 0) return [];
     const today = new Date();
-    // Create a minimal 2-point placeholder to anchor the chart when no price history endpoint exists
+    // Single anchor point at today's P50 so the forecast band has a left edge
     return [
-      {
-        date: new Date(today.getTime() - 86400000 * 5).toISOString().split("T")[0],
-        close: base,
-        open: base,
-        high: base,
-        low: base,
-        volume: 0,
-      },
       {
         date: today.toISOString().split("T")[0],
         close: base,
@@ -113,18 +105,15 @@ export function PriceChart() {
         high: base,
         low: base,
         volume: 0,
+        ema20: undefined as number | undefined,
+        ema50: undefined as number | undefined,
       },
     ];
   }, [analysisData]);
 
   const combined = useMemo(() => {
-    const hist = placeholderData.map((d, i) => ({
-      ...d,
-      ema20: calcEMA(placeholderData.map((x) => x.close), 20)[i],
-      ema50: calcEMA(placeholderData.map((x) => x.close), 50)[i],
-    }));
-    return [...hist, ...forecastBand];
-  }, [placeholderData, forecastBand]);
+    return [...anchorData, ...forecastBand];
+  }, [anchorData, forecastBand]);
 
   const priceMin = useMemo(() => {
     const vals = combined.flatMap((d) => [
@@ -151,10 +140,17 @@ export function PriceChart() {
           <h3 className="text-base font-semibold text-text-primary">Price Chart</h3>
           <HelpPopover
             content={{
-              title: "Price Chart — AI Forecast",
-              body: "The saffron band shows the AI forecast confidence range (P10–P90) for the selected horizon. Historical OHLCV requires a dedicated price endpoint.",
-              affectsVerdict: "Price action relative to EMA20/EMA50 influences the Quant Agent's technical score.",
-              source: "Predictions: XGBoost/LightGBM/CatBoost + Chronos-2 ensemble",
+              title: "AI Price Forecast Chart",
+              body: "After running an analysis, the chart shows the Chronos-2 probabilistic forecast band for the selected time horizon. The dashed line is the median (P50) target. The shaded band is the uncertainty range — P10 (bear case) to P90 (bull case). A narrow band means the model is confident; a wide band means high uncertainty.",
+              level: "beginner",
+              tips: [
+                "P50 (dashed line) = the model's best guess for price at the horizon",
+                "P10 lower band = your stop-loss reference level",
+                "P90 upper band = your take-profit reference level",
+                "Historical OHLCV chart requires the /price-history API endpoint",
+              ],
+              affectsVerdict: "The P50 forecast directly determines the 'Price Target' shown in the Verdict. Risk:Reward is (P90 - current) / (current - P10) — used to size positions.",
+              source: "Chronos-2 (Amazon pretrained) + XGBoost/LightGBM/CatBoost ensemble price targets from /predict endpoint",
             }}
           />
         </div>
@@ -177,9 +173,17 @@ export function PriceChart() {
       </div>
 
       {noData ? (
-        <div className="h-64 flex items-center justify-center">
+        <div className="h-64 flex flex-col items-center justify-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-text-muted">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
           <p className="text-sm text-text-muted text-center">
-            Run analysis to generate AI forecast band.
+            Run an analysis to see the AI price forecast band
+          </p>
+          <p className="text-xs text-text-muted/60 text-center max-w-xs">
+            Historical OHLCV chart requires a <code className="text-text-secondary">GET /price-history</code> backend endpoint (not yet implemented)
           </p>
         </div>
       ) : (
@@ -266,30 +270,23 @@ export function PriceChart() {
         </div>
       )}
 
-      {/* Overlay toggles */}
-      <div className="flex gap-2 mt-3 flex-wrap">
-        {[
-          { label: "EMA20", active: showEMA20, toggle: () => setShowEMA20((v) => !v) },
-          { label: "EMA50", active: showEMA50, toggle: () => setShowEMA50((v) => !v) },
-        ].map(({ label, active, toggle }) => (
-          <button
-            key={label}
-            onClick={toggle}
-            className={cn(
-              "px-2.5 py-1 text-xs rounded-badge border font-medium transition-all duration-150",
-              active
-                ? "bg-saffron-light text-saffron border-saffron/30"
-                : "border-border text-text-muted hover:text-text-primary hover:bg-surface-raised"
-            )}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Legend */}
+      <div className="flex gap-3 mt-3 flex-wrap items-center">
         {forecastBand.length > 0 && (
-          <span className="text-xs text-text-muted self-center ml-1">
-            Saffron band = AI forecast P10–P90 ({horizon}-day)
-          </span>
+          <>
+            <div className="flex items-center gap-1.5">
+              <div className="w-6 h-0.5 bg-saffron/30 border-t-2 border-saffron/20" style={{ borderStyle: "dashed" }} />
+              <span className="text-xs text-text-muted">AI Forecast P50</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-3 rounded-sm bg-saffron/10 border border-saffron/20" />
+              <span className="text-xs text-text-muted">P10–P90 band ({horizon}-day)</span>
+            </div>
+          </>
         )}
+        <span className="text-xs text-text-muted/50 ml-auto">
+          Historical OHLCV: connect <code className="text-text-secondary">GET /price-history</code>
+        </span>
       </div>
 
       {/* Prediction summary if available */}

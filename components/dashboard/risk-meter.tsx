@@ -88,10 +88,17 @@ export function RiskMeter() {
         <h3 className="text-base font-semibold text-text-primary">Risk Assessment</h3>
         <HelpPopover
           content={{
-            title: "Risk Assessment",
-            body: "Composite risk level derived from VIX, FII streak, gamma exposure, and SEBI compliance checks. Determines position sizing.",
-            affectsVerdict: "EXTREME risk level overrides all signals to HOLD and reduces position size.",
-            source: "India risk rules engine — VIX + FII + F&O gamma + SEBI checks",
+            title: "Risk Assessment — Position Sizing",
+            body: "Composite risk level derived from four inputs: (1) India VIX level, (2) FII 5-day sell streak, (3) Option chain gamma exposure near max pain, and (4) SEBI circuit limit proximity. It directly controls how large the recommended position size is.",
+            level: "intermediate",
+            tips: [
+              "LOW risk = full recommended position size allowed",
+              "MEDIUM risk = 75% of normal size",
+              "HIGH risk = 50% of normal size + tighter stop",
+              "EXTREME risk = 25% of normal size or full HOLD",
+            ],
+            affectsVerdict: "EXTREME risk overrides all BUY signals to HOLD. HIGH risk adds a mandatory tighter stop-loss to all position recommendations.",
+            source: "risk_engine.py — VIX rule + FII streak rule + gamma_risk() + SEBI_upper_circuit_check()",
           }}
         />
       </div>

@@ -2,7 +2,6 @@
 import { useApp } from "@/lib/app-context";
 import { HelpPopover } from "@/components/ui/help-popover";
 import { cn, getVixStatus, getFearGreedLabel } from "@/lib/utils";
-import { ResponsiveContainer, LineChart, Line } from "recharts";
 
 function FearGreedGauge({ score }: { score: number }) {
   const { label, color } = getFearGreedLabel(score);
@@ -60,9 +59,6 @@ export function KPICards() {
   const fearGreed = fear_greed_index ?? 50;
   const vixStatus = getVixStatus(vix);
 
-  // Single-point sparklines — real data only (current VIX point)
-  const vixSparkData = [{ v: vix }];
-
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {/* Card 1: India VIX */}
@@ -71,10 +67,17 @@ export function KPICards() {
           <span className="section-label">India VIX</span>
           <HelpPopover
             content={{
-              title: "India VIX — The Fear Gauge",
-              body: "India VIX measures market volatility calculated from Nifty options order book. Higher values indicate more fear and uncertainty.",
-              affectsVerdict: "VIX above 25 triggers a circuit breaker — all signals override to HOLD.",
-              source: "NSE India via yfinance (^INDIAVIX)",
+              title: "India VIX — Volatility Index",
+              body: "India VIX is NSE's official fear gauge, computed from Nifty50 option order book prices. A rising VIX means the market expects bigger price swings ahead — options traders are paying more for protection.",
+              level: "beginner",
+              tips: [
+                "Below 13 = Low fear, complacency — be cautious of reversals",
+                "13–18 = Normal range — healthy market",
+                "18–25 = Elevated — reduce position sizes",
+                "Above 25 = High Fear — circuit breaker active, HOLD only",
+              ],
+              affectsVerdict: "VIX is the primary circuit breaker trigger. Values above 20 cut position sizing by 50%; above 25 forces HOLD mode regardless of other signals.",
+              source: "NSE India VIX — computed from Nifty50 near+mid-month option strikes; fetched live via yfinance ^INDIAVIX",
             }}
           />
         </div>
@@ -86,20 +89,13 @@ export function KPICards() {
             <div className={cn("text-xs font-medium px-2 py-0.5 rounded-badge inline-block mt-1", vixStatus.bg, vixStatus.color)}>
               {vixStatus.label}
             </div>
+            <div className="mt-3 text-xs text-text-muted">
+              {vix < 18 ? "Healthy market conditions" : vix < 25 ? "Elevated — reduce position sizes" : "High Fear — HOLD mode active"}
+            </div>
           </>
         ) : (
           <div className="text-2xl font-bold text-text-muted">N/A</div>
         )}
-        <div className="mt-3 h-10">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={vixSparkData}>
-              <Line type="monotone" dataKey="v"
-                stroke={vix < 18 ? "#059669" : vix < 25 ? "#D97706" : "#DC2626"}
-                dot={false} strokeWidth={1.5} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="text-xs text-text-muted mt-2">Live from backend</div>
       </div>
 
       {/* Card 2: FII Net Flow */}
@@ -108,10 +104,17 @@ export function KPICards() {
           <span className="section-label">FII Net 5d</span>
           <HelpPopover
             content={{
-              title: "FII Net Flow — 5-Day Sum",
-              body: "Foreign Institutional Investor 5-day cumulative net buy/sell. Consistent buying is a bullish signal.",
-              affectsVerdict: "Strong FII buying is weighted positively in the macro agent.",
-              source: "NSE India via nselib — daily participant data",
+              title: "FII Net Flow — 5-Day Rolling Sum",
+              body: "This shows how much net money (buys minus sells) Foreign Institutional Investors have put into Indian equities over the last 5 trading days. Positive = net buyers (bullish). Negative = net sellers (bearish). Large foreign outflows often precede index corrections.",
+              level: "beginner",
+              tips: [
+                "Above +₹2,000Cr = significant foreign buying — bullish pressure",
+                "Below -₹2,000Cr = significant foreign selling — bearish pressure",
+                "FII flows are the single biggest driver of Nifty50 index moves",
+                "FII selling + DII buying = net neutral — often sideways market",
+              ],
+              affectsVerdict: "The 5-day FII net flow is consistently one of the top-5 SHAP features in all three ML models. Large negative flows reduce the macro agent's score significantly.",
+              source: "NSE India participant-wise daily trading data (cash + F&O) — fetched via nselib, published post-market",
             }}
           />
         </div>
@@ -137,9 +140,17 @@ export function KPICards() {
           <HelpPopover
             content={{
               title: "Fear & Greed Index",
-              body: "Composite sentiment index (0–100) combining VIX, FII flows, PCR, and social media sentiment.",
-              affectsVerdict: "Extreme readings can trigger contrarian signals in the emotion agent.",
-              source: "Composite — VIX + FII + PCR + StockTwits + GDELT",
+              body: "A composite score (0–100) measuring the overall emotional state of the Indian market. It combines five data sources: India VIX, FII 5-day flow, NSE Put-Call Ratio, StockTwits social sentiment, and GDELT global news tone. Extreme values are contrarian signals — when everyone is greedy, it is often a good time to be cautious.",
+              level: "beginner",
+              tips: [
+                "0–20 = Extreme Fear — historically strong buy zone",
+                "20–40 = Fear — cautious, but quality setups exist",
+                "40–60 = Neutral — no strong directional bias",
+                "60–80 = Greed — be selective, profits exist but risk is rising",
+                "80–100 = Extreme Greed — Euphoria Warning: HOLD mode",
+              ],
+              affectsVerdict: "A score above 80 activates the Euphoria Warning flag, which overrides STRONG BUY to BUY and reduces all position sizing.",
+              source: "Composite: VIX 30% + FII flow 25% + PCR 20% + StockTwits 15% + GDELT 10% — computed in sentiment_analyzer.py",
             }}
           />
         </div>
@@ -156,10 +167,17 @@ export function KPICards() {
           <span className="section-label">Social Pulse</span>
           <HelpPopover
             content={{
-              title: "Social Sentiment",
-              body: "StockTwits & MoneyControl community sentiment percentage. Post volume indicates engagement level.",
-              affectsVerdict: "High social volume with extreme readings triggers euphoria flag.",
-              source: "StockTwits API + MoneyControl comments scraper",
+              title: "Social Pulse — Community Sentiment",
+              body: "The percentage of social media posts about this stock that are bullish (positive). Sourced from StockTwits and MoneyControl community. High post volume combined with extreme sentiment (above 80% or below 20%) is a contrarian signal — retail crowds are often wrong at extremes.",
+              level: "intermediate",
+              tips: [
+                "Above 80% bullish + high volume = Euphoria warning zone",
+                "Below 20% bullish + high volume = Capitulation — potential bounce",
+                "50–70% = Normal healthy bullish skew",
+                "Low post volume = low conviction reading, treat cautiously",
+              ],
+              affectsVerdict: "Social sentiment carries a 15% weight in the Fear & Greed Index. Above 85% bullish with 500+ posts triggers the Euphoria flag.",
+              source: "StockTwits API (ticker-specific) + MoneyControl discussion board — processed via GoEmotions classifier",
             }}
           />
         </div>

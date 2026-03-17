@@ -43,10 +43,18 @@ export function KeyLevels() {
         <h3 className="text-base font-semibold text-text-primary">Key Price Levels</h3>
         <HelpPopover
           content={{
-            title: "AI Price Targets — P10 / P50 / P90",
-            body: "Probabilistic price targets from the Chronos-2 + ensemble model. P10 = bear scenario, P50 = base target, P90 = bull scenario.",
-            affectsVerdict: "The P50 target is the primary price objective. A narrow P10–P90 band indicates high confidence.",
-            source: "Amazon Chronos-2 pretrained model with India-specific covariates",
+            title: "Probabilistic Price Targets",
+            body: "These three levels come from combining Chronos-2 (a pretrained time-series forecasting model) with the XGBoost/LightGBM/CatBoost ensemble. They represent probabilities, not guarantees: P10 means 10% chance price will be below this level; P90 means 90% chance price will be below this level (i.e., bull case ceiling).",
+            level: "intermediate",
+            tips: [
+              "P10 = bear case floor — use as stop-loss reference",
+              "P50 = base case — the primary price target",
+              "P90 = bull case ceiling — take-profit reference",
+              "Narrow P10–P90 band = high model confidence",
+              "Wide band = high uncertainty, reduce position size",
+            ],
+            affectsVerdict: "The Risk:Reward ratio is (P90 - entry) / (entry - P10). The system only upgrades to STRONG BUY if R:R exceeds 2:1 and confidence is above 70%.",
+            source: "Amazon Chronos-2 (bolt-small) pretrained model + XGBoost/LightGBM/CatBoost regression outputs — ml/price_target_model.py",
           }}
         />
       </div>
