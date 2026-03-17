@@ -2,8 +2,14 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np, datetime, requests
-from ui_helpers import render_global_sidebar, flat_css, render_page_header, render_help_popover
+import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np, datetime
+from ui_helpers import (
+    render_global_sidebar,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_get_json,
+)
 
 st.set_page_config(page_title="Macro · India Engine", page_icon="🌏", layout="wide")
 flat_css(); st.session_state["_page_id"] = "macro"
@@ -29,13 +35,7 @@ render_help_popover("Macro India","""
 """)
 
 def get_macro():
-    try:
-        r = requests.get(f"{API_BASE}/macro/india-cues", timeout=15)
-        if r.status_code==200:
-            return r.json()
-    except Exception as e:
-        st.error(f"Error fetching macro cues: {e}")
-    return None
+    return cached_api_get_json(f"{API_BASE}/macro/india-cues", timeout=15)
 
 m = get_macro()
 if not m:

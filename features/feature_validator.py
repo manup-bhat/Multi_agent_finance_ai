@@ -182,3 +182,26 @@ class FeatureValidator:
             embargo=embargo,
         )
         return True
+
+
+def validate_features(
+    features: pd.DataFrame,
+    *,
+    close_series: Optional[pd.Series] = None,
+    ticker: str | None = None,
+) -> ValidationReport:
+    """
+    Backwards-compatible helper used by older feature-engineering code.
+
+    If close_series is omitted, the function falls back to the ``close`` column
+    in the feature frame. This keeps legacy callers working while still running
+    the anti-lookahead checks at inference time.
+    """
+    if close_series is None:
+        if "close" not in features.columns:
+            raise ValueError(
+                f"close_series missing for feature validation{f' [{ticker}]' if ticker else ''}"
+            )
+        close_series = pd.to_numeric(features["close"], errors="coerce")
+    validator = FeatureValidator()
+    return validator.validate_features(features, close_series)

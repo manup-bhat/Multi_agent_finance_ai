@@ -4,7 +4,7 @@ Call get_settings() everywhere. Never read os.environ directly.
 """
 from __future__ import annotations
 from functools import lru_cache
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,16 +20,39 @@ class Settings(BaseSettings):
     groq_api_key_1: str = ""
     groq_api_key_2: str = ""
     gemini_model: str = "gemini-2.5-pro-exp-03-25"
-    gemini_model_fast: str = "gemini-2.5-flash"
+    gemini_model_fast: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias=AliasChoices("GEMINI_MODEL_FAST", "GEMINI_MODEL_FALLBACK"),
+    )
+    gemini_model_lite: str = "gemini-2.5-flash-lite"
     groq_model_primary: str = "llama-3.3-70b-versatile"
-    groq_model_fast: str = "llama3-8b-8192"
+    groq_model_fast: str = "llama-3.1-8b-instant"
+    groq_model_reasoning: str = ""
     gemini_max_tokens: int = 8192
     groq_max_tokens: int = 4096
     gemini_temperature: float = 0.1
     groq_temperature: float = 0.1
+    groq_daily_token_budget: int = 1_000_000
+    gemini_daily_call_budget: int = 100
+    groq_budget_economy_threshold: float = 0.60
+    groq_budget_emergency_threshold: float = 0.80
+    groq_budget_survival_threshold: float = 0.95
+    llm_budget_state_path: str = "./storage/llm_budget/usage.json"
+    ollama_base_url: str = "http://172.27.144.1:11434"
+    ollama_model_primary: str = "phi4-mini-india:latest"
+    ollama_model_thinking: str = "qwen3:4b"
+    ollama_num_ctx: int = 4096
+    ollama_num_threads: int = 8
+    ollama_temperature: float = 0.0
+    ollama_health_ttl_seconds: int = 30
 
     # ── News ─────────────────────────────────────────────────────────
     finlight_api_key: str = ""
+    alpha_vantage_api_key: str = ""
+    alpha_vantage_base_url: str = "https://www.alphavantage.co/query"
+    moneycontrol_news_url: str = "https://www.moneycontrol.com/news/"
+    moneycontrol_stocks_url: str = "https://www.moneycontrol.com/stocks/cptmarket/compsearchnew.php"
+    moneycontrol_scrape_delay: float = 2.0
 
     # ── yfinance tickers ─────────────────────────────────────────────
     yfinance_india_vix_ticker: str = "^INDIAVIX"
@@ -52,16 +75,27 @@ class Settings(BaseSettings):
     )
     nse_fallback_enabled: bool = True
     nse_fallback_delay: int = 5
+    nse_option_chain_cache_ttl_seconds: int = 60
+    nselib_cache_ttl_seconds: int = 300
 
     # ── Social sentiment (no keys needed) ────────────────────────────
     stocktwits_base_url: str = "https://api.stocktwits.com/api/2/streams/symbol"
     stocktwits_rate_limit_delay: int = 18
     rss_cache_ttl_minutes: int = 30
+    rss_economic_times_markets: str = "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+    rss_economic_times_stocks: str = "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"
+    rss_livemint_markets: str = "https://www.livemint.com/rss/markets"
+    rss_business_standard: str = "https://www.business-standard.com/rss/markets-106.rss"
+    rss_the_hindu_markets: str = "https://www.thehindu.com/business/markets/feeder/default.rss"
+    rss_investing_com_india: str = "https://www.investing.com/rss/news_25.rss"
+    yahoo_finance_rss_url: str = "https://finance.yahoo.com/rss/headline?s={ticker}"
 
     # ── GDELT ────────────────────────────────────────────────────────
     gdelt_base_url: str = "https://api.gdeltproject.org/api/v2/doc/doc"
     gdelt_maxrecords: int = 50
     gdelt_cache_ttl_minutes: int = 60
+    gdelt_mode: str = "ArtList"
+    gdelt_sourcecountry: str = "IN"
 
     # ── India market ─────────────────────────────────────────────────
     india_timezone: str = "Asia/Kolkata"
@@ -119,6 +153,11 @@ class Settings(BaseSettings):
     sentiment_cache_ttl_minutes: int = 120
     fear_greed_extreme_greed: int = 80
     fear_greed_extreme_fear: int = 20
+    sentiment_window_default_days: int = 3
+    sentiment_window_event_days: int = 1
+    social_volume_spike_multiple: float = 3.0
+    social_volume_min_baseline: int = 5
+    euphoria_fear_greed_threshold: int = 80
 
     # ── Vector DB ────────────────────────────────────────────────────
     vector_db: str = "qdrant"
@@ -136,6 +175,7 @@ class Settings(BaseSettings):
     postgres_user: str = "engine_user"
     postgres_password: str = "change_this_strong_password"
     sqlite_path: str = "./storage/prediction_logs/predictions.db"
+    database_url: str = Field(default="", validation_alias=AliasChoices("DATABASE_URL"))
 
     # ── Feedback ─────────────────────────────────────────────────────
     prediction_log_enabled: bool = True
@@ -151,6 +191,8 @@ class Settings(BaseSettings):
     api_secret_key: str = "change_this_to_random_32char_string"
     model_artifacts_dir: str = "./storage/model_artifacts"
     analysis_history_dir: str = "./storage/analysis_history"
+    startup_preload_models: bool = True
+    startup_preload_sentiment_models: bool = True
 
     # ── SEBI ─────────────────────────────────────────────────────────
     max_ops_per_second: int = 10
@@ -169,6 +211,17 @@ class Settings(BaseSettings):
     @property
     def chronos_quantiles(self) -> list[float]:
         return [float(x) for x in self.chronos_quantile_levels.split(",")]
+
+    @property
+    def india_rss_feeds(self) -> dict[str, str]:
+        return {
+            "et_markets": self.rss_economic_times_markets,
+            "et_stocks": self.rss_economic_times_stocks,
+            "livemint_markets": self.rss_livemint_markets,
+            "business_standard": self.rss_business_standard,
+            "the_hindu_markets": self.rss_the_hindu_markets,
+            "investing_com_india": self.rss_investing_com_india,
+        }
 
 
 @lru_cache(maxsize=1)

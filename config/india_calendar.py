@@ -15,8 +15,17 @@ Source-validated rules:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from functools import lru_cache
+from datetime import date, datetime, time, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+try:
+    import holidays
+except Exception:  # pragma: no cover - optional dependency safety
+    holidays = None
+
+from config.constants import MARKET_TZ, NSE_CLOSE, NSE_OPEN
 
 # ── Event type constants ────────────────────────────────────────────────────
 EVENT_RBI_MPC        = "RBI_MPC"
@@ -68,6 +77,43 @@ _RESULTS_SEASONS = [
     ((1, 10), (2, 28)),    # Q3 results (Oct-Dec quarter)
     ((4, 10), (5, 31)),    # Q4 results (Jan-Mar quarter)
 ]
+
+
+@lru_cache(maxsize=8)
+def _india_holidays_for_year(year: int) -> set[date]:
+    """
+    Best-effort holiday set for the Indian market calendar.
+
+    `holidays` provides India public holidays. NSE holidays are not a perfect
+    match, but this is materially safer than treating every weekday as open.
+    """
+    if holidays is None:
+        return set()
+    try:
+        cal = holidays.India(years=[year])
+        return {day for day in cal.keys()}
+    except Exception:
+        return set()
+
+
+def is_trading_day(dt: date) -> bool:
+    """True when the exchange is likely open for regular trading."""
+    if dt.weekday() >= 5:
+        return False
+    return dt not in _india_holidays_for_year(dt.year)
+
+
+def get_last_trading_day(reference: Optional[date] = None) -> date:
+    """
+    Return the most recent likely NSE trading day on or before `reference`.
+
+    This protects startup/default state creation from using weekends or common
+    India public holidays such as Diwali closures.
+    """
+    current = reference or date.today()
+    while not is_trading_day(current):
+        current -= timedelta(days=1)
+    return current
 
 
 def get_next_thursday(dt: date) -> date:
@@ -184,3 +230,61 @@ def get_event_description(event_type: str) -> str:
         EVENT_EXPIRY_WEEK:    "Expiry Week — rising gamma, option writers active",
         EVENT_NORMAL:         "Normal trading day",
     }.get(event_type, "Unknown event")
+
+
+def _parse_market_time(value: str) -> time:
+    hour, minute = (int(part) for part in value.split(":", 1))
+    return time(hour=hour, minute=minute)
+
+
+def get_market_calendar_context(reference: Optional[datetime | date] = None) -> dict[str, object]:
+    """
+    Return the market-session and event context used by the live pipeline.
+
+    `is_open` reflects whether the NSE session is currently open for `reference`.
+    This does not force the API to reject after-hours analysis; callers can choose
+    how to use the signal.
+    """
+    tz = ZoneInfo(MARKET_TZ)
+    if reference is None:
+        now_ist = datetime.now(tz)
+    elif isinstance(reference, datetime):
+        now_ist = reference.astimezone(tz) if reference.tzinfo else reference.replace(tzinfo=tz)
+    else:
+        now_ist = datetime.combine(reference, _parse_market_time(NSE_OPEN), tzinfo=tz)
+
+    session_date = now_ist.date()
+    last_trading_day = get_last_trading_day(session_date)
+    open_time = _parse_market_time(NSE_OPEN)
+    close_time = _parse_market_time(NSE_CLOSE)
+    event_flag = classify_market_event(last_trading_day)
+
+    is_session_open = (
+        is_trading_day(session_date)
+        and open_time <= now_ist.timetz().replace(tzinfo=None) <= close_time
+    )
+
+    return {
+        "is_open": is_session_open,
+        "last_trading_day": last_trading_day,
+        "is_expiry_thursday": is_expiry_thursday(last_trading_day),
+        "days_to_expiry": days_to_next_expiry(last_trading_day),
+        "is_rbi_day": is_rbi_mpc_day(last_trading_day),
+        "is_budget_day": is_budget_day(last_trading_day),
+        "is_result_week": is_results_season(last_trading_day),
+        "event_flag": event_flag,
+    }
+
+
+def resolve_sentiment_window_days(reference: Optional[datetime | date] = None) -> int:
+    """
+    Event-aware social/news aggregation window.
+
+    RBI announcement days, Budget day, and expiry day use a same-day window.
+    Normal sessions use a 3-day rolling window.
+    """
+    context = get_market_calendar_context(reference)
+    event_flag = str(context["event_flag"])
+    if event_flag in {EVENT_RBI_MPC_DAY, EVENT_BUDGET, EVENT_EXPIRY_DAY}:
+        return 1
+    return 3

@@ -141,7 +141,7 @@ async def test_fno_route_no_demo_values(monkeypatch):
     async def fake_get_ohlcv(self, ticker, period="5d", interval="1d"):
         return _price_df(rows=5, ticker=ticker)
 
-    async def fake_get_option_chain(self, symbol):
+    async def fake_get_option_chain(self, symbol, expiry=None):
         return _option_chain()
 
     async def fake_participant_oi(self):
@@ -175,6 +175,10 @@ async def test_predict_route_statistical_fallback(monkeypatch):
     monkeypatch.setattr("data.adapters.nselib_client.NSELibClient.get_fii_dii", fake_fii)
     monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_india_vix", fake_vix)
     monkeypatch.setattr(
+        "features.india_feature_set.IndiaFeatureSet.validate",
+        lambda self, features, close_series: SimpleNamespace(passed=True, same_day_leaks=[], null_columns=[]),
+    )
+    monkeypatch.setattr(
         "prediction.inference.prediction_service.PredictionService.predict",
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("no model")),
     )
@@ -195,6 +199,10 @@ async def test_sentiment_route_shape(monkeypatch):
             composite_label="BULLISH",
             fear_greed_index=61.0,
             fear_greed_label="GREED",
+            social_bullish_pct=68.0,
+            social_post_volume=24,
+            euphoria_flag=False,
+            sentiment_window_days=3,
             articles=[
                 ArticleItem(
                     source="et_markets",
@@ -210,6 +218,7 @@ async def test_sentiment_route_shape(monkeypatch):
 
     result = await analyze_sentiment(SimpleNamespace(ticker="HDFCBANK.NS", sources=None))
     assert result.composite_label == "BULLISH"
+    assert result.social_bullish_pct == 68.0
     assert len(result.articles) == 1
 
 
@@ -224,18 +233,10 @@ async def test_analyze_route_deterministic_fallback(monkeypatch):
     async def fake_vix(self, period="6mo"):
         return _vix_df()
 
-    async def fake_fii_latest():
-        from api.schemas import FIIDIIResponse
-        return FIIDIIResponse(
-            date="2024-03-01",
-            fii_net_crore=1000.0,
-            dii_net_crore=500.0,
-            fii_trend="BUYING",
-            fii_streak_days=2,
-            consensus="STRONG_BULL",
-        )
+    async def fake_fii(self, days=90):
+        return _fii_df()
 
-    async def fake_prediction_response(req):
+    async def fake_prediction_response(req, **kwargs):
         from api.schemas import PredictResponse
         return PredictResponse(
             ticker=req.ticker,
@@ -251,7 +252,7 @@ async def test_analyze_route_deterministic_fallback(monkeypatch):
             model_used="statistical_live_fallback",
         )
 
-    async def fake_sentiment_response(ticker, sources=None):
+    async def fake_sentiment_response(ticker, sources=None, current_vix=None):
         from api.routes.sentiment import SentimentResponse, ArticleItem
         return SentimentResponse(
             ticker=ticker,
@@ -259,25 +260,31 @@ async def test_analyze_route_deterministic_fallback(monkeypatch):
             composite_label="BULLISH",
             fear_greed_index=58.0,
             fear_greed_label="GREED",
+            social_bullish_pct=70.0,
+            social_post_volume=18,
+            euphoria_flag=False,
+            sentiment_window_days=3,
             articles=[ArticleItem(source="et_markets", headline="Strong outlook", sentiment=1.0, label="POSITIVE", date="2024-03-01")],
         )
 
-    async def fake_option_chain(self, symbol):
+    async def fake_option_chain(self, symbol, expiry=None):
         return _option_chain()
 
     monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_ohlcv", fake_get_ohlcv)
     monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_macro_snapshot", fake_macro_snapshot)
     monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_india_vix", fake_vix)
-    monkeypatch.setattr("api.routes.analyze.fii_dii_latest", fake_fii_latest)
-    monkeypatch.setattr("api.routes.analyze.build_live_prediction_response", fake_prediction_response)
+    monkeypatch.setattr("data.adapters.nselib_client.NSELibClient.get_fii_dii", fake_fii)
+    monkeypatch.setattr("api.routes.analyze.build_live_prediction_from_frames", fake_prediction_response)
     monkeypatch.setattr("api.routes.analyze.build_live_sentiment_response", fake_sentiment_response)
     monkeypatch.setattr("data.adapters.nsefin_client.NSEFinClient.get_option_chain", fake_option_chain)
-    monkeypatch.setattr("agents.graph.workflow.build_workflow", lambda: (_ for _ in ()).throw(RuntimeError("skip llm")))
+    monkeypatch.setattr("agents.graph.workflow.get_workflow", lambda: (_ for _ in ()).throw(RuntimeError("skip llm")))
 
     result = await analyze(AnalyzeRequest(ticker="HDFCBANK.NS", horizon=5))
     assert result.verdict in {"BUY", "STRONG_BUY", "HOLD"}
     assert result.ticker == "HDFCBANK.NS"
     assert result.quant_summary
+    assert result.fear_greed_index == 58.0
+    assert result.social_post_volume == 18
 
 
 @pytest.mark.asyncio

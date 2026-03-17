@@ -48,13 +48,32 @@ def _extract_fii_streak(state: IndiaEngineState) -> int:
     """Safely extract FII sell streak days from state."""
     fii_report = state.get("fii_dii_report", {})
     if isinstance(fii_report, dict):
-        return int(fii_report.get("sell_streak_days", 0))
+        return int(
+            fii_report.get("sell_streak_days")
+            or fii_report.get("consecutive_sell_days")
+            or 0
+        )
     return 0
 
 
 def _extract_confidence(state: IndiaEngineState) -> float:
     """Extract prediction confidence from state."""
     return float(state.get("confidence", 0.6))
+
+
+def _extract_composite_sentiment(state: IndiaEngineState) -> dict[str, Any]:
+    composite = state.get("composite_sent", {})
+    return composite if isinstance(composite, dict) else {}
+
+
+def _extract_days_to_expiry(state: IndiaEngineState) -> int:
+    fno_report = state.get("fno_report", {})
+    if isinstance(fno_report, dict) and fno_report.get("days_to_expiry") is not None:
+        return int(fno_report.get("days_to_expiry", 99))
+    market_calendar = state.get("market_calendar", {})
+    if isinstance(market_calendar, dict):
+        return int(market_calendar.get("days_to_expiry", 99))
+    return 99
 
 
 def _is_expiry_today(state: IndiaEngineState) -> bool:
@@ -79,6 +98,15 @@ def run_risk_node(state: IndiaEngineState) -> dict:
     fii_streak = _extract_fii_streak(state)
     confidence = _extract_confidence(state)
     expiry_today = _is_expiry_today(state)
+    composite_sent = _extract_composite_sentiment(state)
+    fear_greed = int(
+        composite_sent.get("fear_greed")
+        or composite_sent.get("fear_greed_index")
+        or 50
+    )
+    social_volume = int(composite_sent.get("social_post_volume", 0) or 0)
+    euphoria_flag = bool(composite_sent.get("euphoria_flag", False))
+    days_to_expiry = _extract_days_to_expiry(state)
 
     notes: list[str] = []
 
@@ -101,7 +129,7 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         notes.append(f"FII SELL STREAK: {fii_streak} consecutive days → size reduced 40%.")
 
     # ── 4. Gamma risk (expiry Thursday) ──────────────────────────
-    gamma_risk_flag = expiry_today
+    gamma_risk_flag = expiry_today or days_to_expiry == 0
     if gamma_risk_flag:
         notes.append("EXPIRY THURSDAY: Gamma risk active. Max Pain pin risk. Close positions by 15:20 IST.")
 
@@ -111,7 +139,21 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         notes.append(f"LOW CONFIDENCE: {confidence:.0%} < {MIN_CONFIDENCE_THRESHOLD:.0%}. Reduce size or HOLD.")
         vix_multiplier *= 0.75  # Additional 25% size reduction on low confidence
 
-    # ── 6. Kelly Criterion position size ─────────────────────────
+    # ── 6. Social euphoria / complacency overlays ───────────────
+    complacency_warning = fear_greed > 80 and vix < 15
+    if euphoria_flag:
+        vix_multiplier *= 0.80
+        notes.append(
+            f"EUPHORIA: Social volume spike ({social_volume}) with Fear/Greed {fear_greed}. "
+            "Reduce size an additional 20%."
+        )
+    if complacency_warning:
+        notes.append(
+            f"COMPLACENCY: Fear/Greed {fear_greed} with VIX {vix:.1f}. "
+            "Extreme greed under low volatility often reverses sharply."
+        )
+
+    # ── 7. Kelly Criterion position size ─────────────────────────
     # Use confidence as a proxy for win probability; assume 1.5:1 reward/risk
     kelly_result = compute_position_size(
         win_probability=max(0.35, min(0.75, confidence)),
@@ -121,7 +163,7 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         ticker=ticker,
     )
 
-    # ── 7. SEBI rate limit check ──────────────────────────────────
+    # ── 8. SEBI rate limit check ──────────────────────────────────
     sebi_compliant = True   # Check is advisory — actual enforcement at API layer
 
     # ── Override verdict if circuit breaker ──────────────────────
@@ -146,6 +188,10 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         "fii_streak_days": fii_streak,
         "gamma_risk_flag": gamma_risk_flag,
         "low_confidence_flag": low_confidence_flag,
+        "euphoria_flag": euphoria_flag,
+        "fear_greed": fear_greed,
+        "social_volume": social_volume,
+        "complacency_warning": complacency_warning,
         "kelly_fraction": kelly_result.recommended_capital_pct,
         "kelly_details": {
             "raw_kelly": kelly_result.kelly_fraction,

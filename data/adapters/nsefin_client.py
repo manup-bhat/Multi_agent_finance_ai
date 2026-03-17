@@ -27,6 +27,7 @@ import pandas as pd
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 import structlog
 from config.settings import get_settings
+from data.adapters.base_adapter import BaseAdapter
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -129,7 +130,7 @@ def _fetch_option_chain_with_retry(symbol: str) -> pd.DataFrame:
     return _fetch_option_chain_once(symbol)
 
 
-class NSEFinClient:
+class NSEFinClient(BaseAdapter):
     """
     Option chain via direct NSE API (bypasses nsefin's two confirmed bugs).
     MarketClosedError is correctly propagated — never retried, never swallowed.
@@ -140,20 +141,61 @@ class NSEFinClient:
             settings.nse_request_delay_min, settings.nse_request_delay_max
         ))
 
-    async def get_option_chain(self, symbol: str) -> pd.DataFrame:
+    def _filter_option_chain_expiry(
+        self,
+        chain_df: pd.DataFrame,
+        expiry: Optional[str] = None,
+    ) -> pd.DataFrame:
+        if chain_df.empty or "expiry_date" not in chain_df.columns:
+            return chain_df
+
+        df = chain_df.copy()
+        expiry_dates = pd.to_datetime(df["expiry_date"], errors="coerce", dayfirst=True)
+        if expiry_dates.isna().all():
+            return df
+
+        if expiry:
+            target = pd.to_datetime(expiry, errors="coerce")
+            if pd.notna(target):
+                filtered = df.loc[expiry_dates.dt.normalize() == target.normalize()].copy()
+                if not filtered.empty:
+                    return filtered
+
+        today = pd.Timestamp.now(tz="Asia/Kolkata").normalize().tz_localize(None)
+        candidates = expiry_dates.dropna().dt.normalize()
+        future_expiries = sorted({value for value in candidates if value >= today})
+        selected_expiry = future_expiries[0] if future_expiries else candidates.min()
+
+        filtered = df.loc[expiry_dates.dt.normalize() == selected_expiry].copy()
+        if filtered.empty:
+            return df
+        logger.info(
+            "nsefin.option_chain_expiry_filtered",
+            selected_expiry=str(selected_expiry.date()),
+            rows=len(filtered),
+        )
+        return filtered
+
+    async def get_option_chain(self, symbol: str, expiry: Optional[str] = None) -> pd.DataFrame:
         """
         Primary: direct NSE API with jugaad-validated session.
         MarketClosedError → re-raised to caller (validator treats as WARN).
         Other errors → fallback to nsepython.
         """
         loop = asyncio.get_event_loop()
+        cache_key = self._cache_key("option_chain_raw", symbol.upper())
+        ttl_seconds = settings.nse_option_chain_cache_ttl_seconds
 
         def _sync():
-            self._delay()
-            return _fetch_option_chain_with_retry(symbol)
+            def _load() -> pd.DataFrame:
+                self._delay()
+                return _fetch_option_chain_with_retry(symbol)
+
+            return self._cached(key=cache_key, ttl_seconds=ttl_seconds, loader=_load)
 
         try:
-            df = await loop.run_in_executor(None, _sync)
+            raw_df = await loop.run_in_executor(None, _sync)
+            df = self._filter_option_chain_expiry(raw_df, expiry=expiry)
             logger.info("nsefin.option_chain_ok",
                         symbol=symbol, rows=len(df), source="direct_nse")
             return df
@@ -163,7 +205,8 @@ class NSEFinClient:
             logger.warning("nsefin.direct_failed_using_nsepython",
                            symbol=symbol, error=str(e))
             from data.adapters.nsepython_client import NSEPythonClient
-            return await NSEPythonClient().get_option_chain(symbol)
+            fallback_df = await NSEPythonClient().get_option_chain(symbol)
+            return self._filter_option_chain_expiry(fallback_df, expiry=expiry)
 
     # ── Bhavcopy ──────────────────────────────────────────────────────
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=15))

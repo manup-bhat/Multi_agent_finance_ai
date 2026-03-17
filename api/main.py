@@ -4,15 +4,26 @@ FastAPI — India Multi-Agent Financial Engine — Main Entry Point.
 from __future__ import annotations
 
 import time
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api.runtime import warm_app_runtime
 from api.routes import health, analyze, predict, fno, macro, fii_dii, backtest, sentiment
 
 logger = structlog.get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    try:
+        await warm_app_runtime()
+    except Exception as exc:
+        logger.warning("api.startup_prewarm_failed", error=str(exc))
+    yield
 
 
 # ── App ───────────────────────────────────────────────────────────────────
@@ -25,6 +36,7 @@ app = FastAPI(
     version="12.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # ── CORS — allow Streamlit frontend ───────────────────────────────────────

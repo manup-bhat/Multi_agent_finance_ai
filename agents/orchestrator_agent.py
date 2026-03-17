@@ -77,10 +77,57 @@ def _parse_verdict(report: str) -> str:
     return "HOLD"
 
 
+def _build_validation_fallback_report(state: IndiaEngineState) -> str:
+    validation = state.get("workflow_validation", {}) or {}
+    missing = validation.get("missing_keys", [])
+    blocking_errors = validation.get("blocking_errors", [])
+    ticker = state.get("ticker", "N/A")
+    horizon = state.get("horizon", "N/A")
+    analysis_date = state.get("analysis_date", "N/A")
+    return (
+        "INDIA MARKET ANALYSIS REPORT\n"
+        f"Ticker: {ticker} | Date: {analysis_date} | Horizon: {horizon} days\n\n"
+        "VERDICT: HOLD\n"
+        "CONFIDENCE: 0% | REGIME: UNKNOWN\n\n"
+        "PRICE TARGETS (₹):\n"
+        "  Conservative (P10): N/A\n"
+        "  Base Case (P50):    N/A\n"
+        "  Optimistic (P90):   N/A\n\n"
+        "TECHNICAL: Orchestration skipped because prerequisite agent outputs were missing.\n\n"
+        "MACRO: Workflow validation blocked final synthesis.\n\n"
+        "F&O: Not synthesized due to incomplete upstream state.\n"
+        "  Recommended Strategy: None\n"
+        "  Breakevens: N/A\n\n"
+        "SENTIMENT: Incomplete upstream state.\n\n"
+        "RISKS (from Devil's Advocate):\n"
+        f"  1. Missing analyses: {', '.join(missing) if missing else 'unknown'}\n"
+        f"  2. Blocking errors: {', '.join(blocking_errors) if blocking_errors else 'none reported'}\n"
+        "  3. Final verdict downgraded to HOLD for safety.\n"
+        "  4. Re-run analysis after upstream agent recovery.\n\n"
+        "POSITION SIZING:\n"
+        "  Recommended capital: 0%\n"
+        "  Max lots (if F&O):   0\n"
+        "  VIX adjustment:      N/A\n\n"
+        "CITATIONS: Validation fallback - no LLM synthesis performed."
+    )
+
+
 def run_orchestrator_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Orchestrator (Gemini 2.5 Pro), writes final report."""
     ticker = state.get("ticker", "N/A")
     logger.info("orchestrator_agent.start", ticker=ticker)
+
+    validation = state.get("workflow_validation", {}) or {}
+    if validation and not validation.get("ready", True):
+        logger.warning(
+            "orchestrator_agent.validation_blocked",
+            missing_keys=validation.get("missing_keys", []),
+        )
+        return {
+            "orchestrator_report": _build_validation_fallback_report(state),
+            "verdict": "HOLD",
+            "confidence": 0.0,
+        }
 
     # Safety: if circuit breaker active, enforce HOLD regardless
     risk = state.get("risk_node_output", {})
@@ -90,7 +137,7 @@ def run_orchestrator_agent(state: IndiaEngineState) -> dict:
         logger.info("orchestrator_agent.circuit_breaker_enforced")
 
     context = _build_orchestrator_context(state)
-    report = call_gemini(_PROMPT, context, max_tokens=4096)
+    report = call_gemini(_PROMPT, context, task="orchestrator", max_tokens=4096)
     updates["orchestrator_report"] = report
 
     # Parse verdict from report (only if not already forced to HOLD)

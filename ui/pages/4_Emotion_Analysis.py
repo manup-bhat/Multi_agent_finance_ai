@@ -5,7 +5,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd, numpy as np, datetime
-from ui_helpers import render_global_sidebar, flat_css, render_page_header, render_help_popover
+from ui_helpers import (
+    render_global_sidebar,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_post_json,
+)
 
 st.set_page_config(page_title="Emotion · India Engine", page_icon="😨", layout="wide")
 flat_css()
@@ -27,17 +33,14 @@ Composite > +0.3 reinforces bullish price signals.
 **India note:** Retail (9cr NSE accounts) drives sentiment spikes at expiry.
 """)
 
-import requests
 from ui_helpers import safe_yf_download
 
 def get_live_sentiment(tkr):
-    try:
-        r = requests.post("http://localhost:8000/sentiment", json={"ticker": tkr}, timeout=15)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
-    return None
+    return cached_api_post_json(
+        "http://localhost:8000/sentiment",
+        {"ticker": tkr},
+        timeout=15,
+    )
 
 live_data = get_live_sentiment(ticker)
 if not live_data:

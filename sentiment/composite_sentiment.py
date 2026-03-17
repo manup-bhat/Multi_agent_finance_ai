@@ -117,9 +117,16 @@ class ComponentScores:
     """Individual model contributions — for transparency and debugging."""
     finbert_institutional: float = 0.0        # ProsusAI/finbert fused with India booster
     india_finbert_boost:  float = 0.0         # India booster effect (delta from pure prosus)
+    india_specific_score: float = 0.0         # India-weighted news direction score
     fear_greed_normalized: float = 0.0        # Fear/Greed [0,100] → normalized to [-1, +1]
     gdelt_tone: float = 0.0                   # GDELT composite [-1, +1]
     earnings_tone: float = 0.0                # finbert-tone [-1, +1]
+    alpha_vantage_score: float = 0.0          # Alpha Vantage score [-1, +1]
+    social_bullish_pct: float = 50.0
+    social_post_volume: int = 0
+    sentiment_window_days: int = 3
+    high_volume_flag: bool = False
+    euphoria_flag: bool = False
     
     # Fears/Greed detail
     fear_greed_raw_index: float = 50.0        # raw 0-100 value
@@ -146,6 +153,16 @@ class CompositeSentimentResult:
     fear_greed_index: float    # 0-100 (India retail sentiment gauge)
     fear_greed_label: str      # "EXTREME_FEAR" | "FEAR" | "NEUTRAL" | "GREED" | "EXTREME_GREED"
     contrarian_signal: str     # "CONTRARIAN_BUY" | "CONTRARIAN_SELL" | "NO_SIGNAL"
+    institutional_score: float = 0.0
+    india_specific_score: float = 0.0
+    social_bullish_pct: float = 50.0
+    social_post_volume: int = 0
+    alpha_vantage_score: float = 0.0
+    gdelt_macro_tone: float = 0.0
+    earnings_tone: float = 0.0
+    sentiment_window_days: int = 3
+    high_volume_flag: bool = False
+    euphoria_flag: bool = False
     
     components: ComponentScores = field(default_factory=ComponentScores)
     
@@ -165,6 +182,7 @@ class CompositeSentimentResult:
 def _resolve_weights(
     is_results_season: bool,
     is_geopolitical_crisis: bool,
+    high_social_volume: bool = False,
 ) -> tuple[float, float, float, float, str]:
     """
     Return (w_finbert, w_fg, w_gdelt, w_earnings, adjustment_label).
@@ -178,21 +196,37 @@ def _resolve_weights(
     """
     if is_results_season and is_geopolitical_crisis:
         # Both: split the adjustments
-        return 0.25, 0.20, 0.25, 0.30, "RESULTS_SEASON+GEOPOLITICAL"
+        weights = (0.25, 0.20, 0.25, 0.30)
+        label = "RESULTS_SEASON+GEOPOLITICAL"
     elif is_results_season:
         # Earnings guidance is most important signal
-        return 0.25, 0.25, 0.15, 0.35, "RESULTS_SEASON"
+        weights = (0.25, 0.25, 0.15, 0.35)
+        label = "RESULTS_SEASON"
     elif is_geopolitical_crisis:
         # Global macro tone drives markets more than retail sentiment
-        return 0.30, 0.15, 0.35, 0.20, "GEOPOLITICAL"
+        weights = (0.30, 0.15, 0.35, 0.20)
+        label = "GEOPOLITICAL"
     else:
-        return (
+        weights = (
             SENTIMENT_WEIGHT_FINBERT,
             SENTIMENT_WEIGHT_FEAR_GREED,
             SENTIMENT_WEIGHT_GDELT,
             SENTIMENT_WEIGHT_EARNINGS,
-            "NONE",
         )
+        label = "NONE"
+
+    w_finbert, w_fg, w_gdelt, w_earnings = weights
+    if high_social_volume and w_fg < 0.35:
+        delta = 0.35 - w_fg
+        finbert_cut = min(delta * 0.6, max(0.0, w_finbert - 0.15))
+        gdelt_cut = min(delta - finbert_cut, max(0.0, w_gdelt - 0.10))
+        actual_delta = finbert_cut + gdelt_cut
+        w_finbert -= finbert_cut
+        w_gdelt -= gdelt_cut
+        w_fg += actual_delta
+        if actual_delta > 0:
+            label = f"{label}+HIGH_SOCIAL_VOLUME" if label != "NONE" else "HIGH_SOCIAL_VOLUME"
+    return w_finbert, w_fg, w_gdelt, w_earnings, label
 
 
 # ── Main Composite Engine ─────────────────────────────────────────────────────
@@ -233,6 +267,11 @@ class CompositeSentimentEngine:
         current_vix: Optional[float] = None,
         is_results_season: bool = False,
         is_geopolitical_crisis: bool = False,
+        alpha_vantage_score: float = 0.0,
+        social_post_volume: int = 0,
+        social_bullish_pct: Optional[float] = None,
+        sentiment_window_days: int = 3,
+        high_social_volume: bool = False,
     ) -> CompositeSentimentResult:
         """
         Full 5-model sentiment analysis for a ticker.
@@ -255,7 +294,7 @@ class CompositeSentimentEngine:
         """
         earnings_texts = earnings_texts or []
         w_finbert, w_fg, w_gdelt, w_earnings, weight_adj = _resolve_weights(
-            is_results_season, is_geopolitical_crisis
+            is_results_season, is_geopolitical_crisis, high_social_volume=high_social_volume
         )
 
         # ── Parallel: fetch GDELT if not pre-fetched ──────────────────────────
@@ -335,6 +374,10 @@ class CompositeSentimentEngine:
         else:
             fused_finbert_score = finbert_base_score
 
+        if social_bullish_pct is None:
+            labelled = stocktwits_bullish + stocktwits_bearish
+            social_bullish_pct = round((stocktwits_bullish / labelled) * 100.0, 2) if labelled else 50.0
+
         # ── Normalize Fear/Greed [0,100] → [-1, +1] ──────────────────────────
         fg_normalized = (fear_greed_result.index - 50.0) / 50.0  # [-1, +1]
 
@@ -345,9 +388,17 @@ class CompositeSentimentEngine:
             w_finbert += w_earnings
             w_earnings = 0.0
 
+        institutional_score = fused_finbert_score
+        if alpha_vantage_score:
+            institutional_score = round((0.8 * fused_finbert_score) + (0.2 * alpha_vantage_score), 4)
+
+        euphoria_flag = bool(
+            high_social_volume and fear_greed_result.index >= FEAR_GREED_EXTREME_GREED
+        )
+
         # ── Weighted composite formula (blueprint) ────────────────────────────
         composite_score = (
-            w_finbert  * fused_finbert_score +
+            w_finbert  * institutional_score +
             w_fg       * fg_normalized        +
             w_gdelt    * gdelt_score           +
             w_earnings * earnings_score
@@ -355,7 +406,7 @@ class CompositeSentimentEngine:
         composite_score = round(max(-1.0, min(1.0, composite_score)), 4)
 
         # ── Model agreement confidence ────────────────────────────────────────
-        component_scores_list = [fused_finbert_score, fg_normalized, gdelt_score]
+        component_scores_list = [institutional_score, fg_normalized, gdelt_score]
         if earnings_texts:
             component_scores_list.append(earnings_score)
         confidence = _model_agreement_confidence(component_scores_list)
@@ -363,11 +414,18 @@ class CompositeSentimentEngine:
         label = _score_to_label(composite_score)
 
         components = ComponentScores(
-            finbert_institutional=round(fused_finbert_score, 4),
+            finbert_institutional=round(institutional_score, 4),
             india_finbert_boost=round(india_boost_delta, 4),
+            india_specific_score=round(fused_finbert_score, 4),
             fear_greed_normalized=round(fg_normalized, 4),
             gdelt_tone=round(gdelt_score, 4),
             earnings_tone=round(earnings_score, 4),
+            alpha_vantage_score=round(alpha_vantage_score, 4),
+            social_bullish_pct=round(float(social_bullish_pct), 2),
+            social_post_volume=int(social_post_volume),
+            sentiment_window_days=int(sentiment_window_days),
+            high_volume_flag=bool(high_social_volume),
+            euphoria_flag=euphoria_flag,
             fear_greed_raw_index=fear_greed_result.index,
             fear_greed_label=fear_greed_result.label,
             fear_greed_contrarian=fear_greed_result.contrarian_signal,
@@ -386,6 +444,8 @@ class CompositeSentimentEngine:
             fg_index=fear_greed_result.index,
             contrarian=fear_greed_result.contrarian_signal,
             weight_adj=weight_adj,
+            social_volume=social_post_volume,
+            euphoria=euphoria_flag,
         )
 
         return CompositeSentimentResult(
@@ -396,6 +456,16 @@ class CompositeSentimentEngine:
             fear_greed_index=fear_greed_result.index,
             fear_greed_label=fear_greed_result.label,
             contrarian_signal=fear_greed_result.contrarian_signal,
+            institutional_score=round(institutional_score, 4),
+            india_specific_score=round(fused_finbert_score, 4),
+            social_bullish_pct=round(float(social_bullish_pct), 2),
+            social_post_volume=int(social_post_volume),
+            alpha_vantage_score=round(alpha_vantage_score, 4),
+            gdelt_macro_tone=round(gdelt_score, 4),
+            earnings_tone=round(earnings_score, 4),
+            sentiment_window_days=int(sentiment_window_days),
+            high_volume_flag=bool(high_social_volume),
+            euphoria_flag=euphoria_flag,
             components=components,
             is_results_season=is_results_season,
             is_geopolitical_crisis=is_geopolitical_crisis,

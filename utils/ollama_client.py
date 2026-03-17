@@ -1,37 +1,33 @@
 # utils/ollama_client.py
 """
-Local Ollama client for phi4-mini-india.
-Handles all preprocessing tasks locally — zero API cost.
-Connects from WSL to Windows Ollama via host IP.
+Local Ollama client and compatibility helpers.
 
-Tasks handled locally (saves Groq/Gemini API calls):
-  - India news relevance filtering
-  - Technical indicator formatting
-  - JSON extraction from raw API responses
-  - News preprocessing and summarisation
-  - Quick sentiment classification
-  - Emergency fallback analysis
+Low-risk preprocessing remains local. Higher-impact structured helper tasks
+delegate to utils.llm_router so existing imports keep working while routing
+decisions are budget-aware.
 """
 
 import json
-import os
+import re
 import subprocess
+import time
 
 import requests
 import structlog
-from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_fixed
+from config.settings import get_settings
 
-load_dotenv()
 logger = structlog.get_logger()
+settings = get_settings()
 
 # ── Config from .env ──────────────────────────────────────────────
-OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL", "http://172.27.144.1:11434")
-OLLAMA_MODEL       = os.getenv("OLLAMA_MODEL_PRIMARY", "phi4-mini-india:latest")
-OLLAMA_MODEL_THINK = os.getenv("OLLAMA_MODEL_THINKING", "qwen3:4b")
-OLLAMA_NUM_CTX     = int(os.getenv("OLLAMA_NUM_CTX", 4096))
-OLLAMA_NUM_THREADS = int(os.getenv("OLLAMA_NUM_THREADS", 8))
-OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", 0.0))
+OLLAMA_BASE_URL    = settings.ollama_base_url
+OLLAMA_MODEL       = settings.ollama_model_primary
+OLLAMA_MODEL_THINK = settings.ollama_model_thinking
+OLLAMA_NUM_CTX     = settings.ollama_num_ctx
+OLLAMA_NUM_THREADS = settings.ollama_num_threads
+OLLAMA_TEMPERATURE = settings.ollama_temperature
+OLLAMA_HEALTH_TTL_SECONDS = settings.ollama_health_ttl_seconds
 
 # ── Task-specific system prompts ──────────────────────────────────
 PROMPTS = {
@@ -77,6 +73,19 @@ MAX_TOKENS = {
     "default":   512,
 }
 
+_OLLAMA_HEALTH_CACHE = {
+    "checked_at": 0.0,
+    "running": False,
+    "active_url": OLLAMA_BASE_URL,
+}
+_INDIA_RELEVANCE_PATTERN = re.compile(
+    r"\b("
+    r"india|indian|nse|bse|nifty|sensex|banknifty|finnifty|midcpnifty|"
+    r"sebi|rbi|fii|dii|fpi|rupee|inr|gift nifty|sgx nifty"
+    r")\b|(?:\.[NB]S)|₹",
+    re.IGNORECASE,
+)
+
 
 # ── Ticker normalisation ──────────────────────────────────────────
 def normalise_ticker(ticker: str) -> str:
@@ -114,11 +123,23 @@ def normalise_ticker(ticker: str) -> str:
 
 
 # ── Health check ──────────────────────────────────────────────────
-def is_ollama_running() -> bool:
+def _update_ollama_health_cache(*, running: bool, active_url: str | None = None) -> bool:
+    _OLLAMA_HEALTH_CACHE["checked_at"] = time.monotonic()
+    _OLLAMA_HEALTH_CACHE["running"] = running
+    if active_url:
+        _OLLAMA_HEALTH_CACHE["active_url"] = active_url
+    return running
+
+
+def is_ollama_running(force_refresh: bool = False) -> bool:
     """
     Check if Ollama server is reachable from WSL.
     Auto-detects Windows host IP if connection fails on configured URL.
     """
+    age = time.monotonic() - float(_OLLAMA_HEALTH_CACHE["checked_at"])
+    if not force_refresh and age < OLLAMA_HEALTH_TTL_SECONDS:
+        return bool(_OLLAMA_HEALTH_CACHE["running"])
+
     # Try configured URL first
     try:
         r = requests.get(
@@ -126,7 +147,10 @@ def is_ollama_running() -> bool:
             timeout=3,
         )
         if r.status_code == 200:
-            return True
+            return _update_ollama_health_cache(
+                running=True,
+                active_url=OLLAMA_BASE_URL,
+            )
     except Exception:
         pass
 
@@ -143,7 +167,10 @@ def is_ollama_running() -> bool:
                     actual=fallback_url,
                     tip="Update OLLAMA_BASE_URL in .env",
                 )
-                return True
+                return _update_ollama_health_cache(
+                    running=True,
+                    active_url=fallback_url,
+                )
         except Exception:
             pass
 
@@ -152,7 +179,7 @@ def is_ollama_running() -> bool:
         url=OLLAMA_BASE_URL,
         tip="Run D:\\start_ollama.bat on Windows first",
     )
-    return False
+    return _update_ollama_health_cache(running=False, active_url=OLLAMA_BASE_URL)
 
 
 def _get_windows_host_ip() -> str:
@@ -173,14 +200,13 @@ def _get_windows_host_ip() -> str:
 
 def get_active_ollama_url() -> str:
     """Return the working Ollama URL — configured or auto-detected."""
-    try:
-        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
-        if r.status_code == 200:
-            return OLLAMA_BASE_URL
-    except Exception:
-        pass
-    ip = _get_windows_host_ip()
-    return f"http://{ip}:11434" if ip else OLLAMA_BASE_URL
+    age = time.monotonic() - float(_OLLAMA_HEALTH_CACHE["checked_at"])
+    if age < OLLAMA_HEALTH_TTL_SECONDS and _OLLAMA_HEALTH_CACHE["active_url"]:
+        return str(_OLLAMA_HEALTH_CACHE["active_url"])
+
+    if is_ollama_running(force_refresh=True):
+        return str(_OLLAMA_HEALTH_CACHE["active_url"])
+    return OLLAMA_BASE_URL
 
 
 # ── Core chat function ────────────────────────────────────────────
@@ -270,12 +296,47 @@ def is_india_relevant(headline: str) -> bool:
         is_india_relevant("Fed raises US rates")     → False
         is_india_relevant("RELIANCE.NS up 2.3%")    → True
     """
+    if _INDIA_RELEVANCE_PATTERN.search(headline or ""):
+        return True
+
     result = _chat(
         system_prompt=PROMPTS["relevance"],
         user_message=headline,
         max_tokens=MAX_TOKENS["relevance"],
     )
     return "yes" in result.lower()
+
+
+def _batch_is_india_relevant(headlines: list[str]) -> list[bool]:
+    if not headlines:
+        return []
+
+    heuristic = [bool(_INDIA_RELEVANCE_PATTERN.search(text or "")) for text in headlines]
+    if all(heuristic):
+        return heuristic
+
+    numbered = "\n".join(f"{idx + 1}. {headline}" for idx, headline in enumerate(headlines))
+    prompt = (
+        "For each numbered headline, reply with exactly one line in the format "
+        "'<number>: YES' or '<number>: NO'. "
+        "YES means relevant to Indian equities, NSE/BSE, RBI/SEBI, rupee, "
+        "Indian listed companies, or Indian market structure."
+    )
+    result = _chat(
+        system_prompt=prompt,
+        user_message=numbered,
+        max_tokens=max(32, len(headlines) * 6),
+    )
+
+    decisions = heuristic[:]
+    for line in result.splitlines():
+        match = re.match(r"\s*(\d+)\s*:\s*(YES|NO)\b", line.strip(), re.IGNORECASE)
+        if not match:
+            continue
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < len(decisions):
+            decisions[idx] = match.group(2).upper() == "YES"
+    return decisions
 
 
 def format_ta_to_text(ta_values: dict) -> str:
@@ -290,11 +351,9 @@ def format_ta_to_text(ta_values: dict) -> str:
            with positive momentum. ADX at 32.1 confirms a strong
            trending market rather than a sideways range."
     """
-    return _chat(
-        system_prompt=PROMPTS["ta_format"],
-        user_message=str(ta_values),
-        max_tokens=MAX_TOKENS["ta_format"],
-    )
+    from utils.llm_router import llm_router
+
+    return llm_router.format_ta_to_text(ta_values)
 
 
 def extract_json(raw_text: str, schema_example: str = "") -> str:
@@ -310,26 +369,9 @@ def extract_json(raw_text: str, schema_example: str = "") -> str:
         extract_json("Reliance Q3 profit 21930 crore")
         → '{"ticker":"RELIANCE.NS","profit_cr":21930}'
     """
-    user_msg = raw_text[:1500]
-    if schema_example:
-        user_msg = f"Schema example: {schema_example}\nText: {user_msg}"
+    from utils.llm_router import llm_router
 
-    result = _chat(
-        system_prompt=PROMPTS["json"],
-        user_message=user_msg,
-        max_tokens=MAX_TOKENS["json"],
-    )
-
-    # Post-process: normalise ticker to .NS format if present
-    try:
-        data = json.loads(result)
-        if "ticker" in data:
-            data["ticker"] = normalise_ticker(str(data["ticker"]))
-        return json.dumps(data)
-    except (json.JSONDecodeError, ValueError):
-        # Return raw result if JSON parsing fails
-        logger.warning("JSON parsing failed", raw=result[:100])
-        return result
+    return llm_router.extract_json(raw_text, schema_example=schema_example)
 
 
 def preprocess_news(articles: list) -> str:
@@ -341,18 +383,9 @@ def preprocess_news(articles: list) -> str:
     Input:  list of dicts with 'title' and 'summary' keys
     Output: "- Reliance Q3 profit up 12%\n- FII bought Rs 3200 crore..."
     """
-    if not articles:
-        return ""
+    from utils.llm_router import llm_router
 
-    combined = "\n".join([
-        f"- {a.get('title', '')}: {a.get('summary', '')[:150]}"
-        for a in articles[:5]
-    ])
-    return _chat(
-        system_prompt=PROMPTS["news"],
-        user_message=combined,
-        max_tokens=MAX_TOKENS["news"],
-    )
+    return llm_router.preprocess_news(articles)
 
 
 def classify_sentiment(text: str) -> str:
@@ -402,11 +435,12 @@ def filter_india_news(articles: list) -> list:
     if not articles:
         return []
 
-    filtered = []
-    for article in articles:
-        title = article.get("title", "")
-        if title and is_india_relevant(title):
-            filtered.append(article)
+    titles = [article.get("title", "") for article in articles]
+    decisions = _batch_is_india_relevant(titles)
+    filtered = [
+        article for article, keep in zip(articles, decisions)
+        if article.get("title") and keep
+    ]
 
     logger.info(
         "News filtered",

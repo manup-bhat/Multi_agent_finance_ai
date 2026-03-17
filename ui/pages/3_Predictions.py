@@ -4,8 +4,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import plotly.graph_objects as go
-import numpy as np, pandas as pd, datetime, requests
-from ui_helpers import render_global_sidebar, safe_yf_download, flat_css, render_page_header, render_help_popover
+import numpy as np, pandas as pd, datetime
+from ui_helpers import (
+    render_global_sidebar,
+    safe_yf_download,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_post_json,
+)
 
 st.set_page_config(page_title="Predictions · India Engine", page_icon="🔮", layout="wide")
 flat_css()
@@ -36,13 +43,11 @@ render_help_popover("ML Predictions","""
 API_BASE = "http://localhost:8000"
 
 def get_predict(tkr, hrz):
-    try:
-        r = requests.post(f"{API_BASE}/predict", json={"ticker": tkr, "horizon": hrz}, timeout=20)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
-    return None
+    return cached_api_post_json(
+        f"{API_BASE}/predict",
+        {"ticker": tkr, "horizon": hrz},
+        timeout=20,
+    )
 
 prev = st.session_state.get("pred_ticker","")
 if run_btn_val or prev != ticker or "pred_data" not in st.session_state:

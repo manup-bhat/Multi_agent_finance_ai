@@ -1,8 +1,10 @@
-import os
 import time
+from typing import Any
+
 from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 import structlog
+
 from config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -22,14 +24,6 @@ class GroqFailoverClient:
         if cfg.groq_api_key_1: keys.append(cfg.groq_api_key_1)
         if cfg.groq_api_key_2: keys.append(cfg.groq_api_key_2)
         if not keys and cfg.groq_api_key: keys.append(cfg.groq_api_key)
-        if not keys:
-            # Fallback to direct os.getenv if env not injected completely
-            k1 = os.getenv("GROQ_API_KEY_1")
-            k2 = os.getenv("GROQ_API_KEY_2")
-            k = os.getenv("GROQ_API_KEY")
-            if k1: keys.append(k1)
-            if k2: keys.append(k2)
-            if not keys and k: keys.append(k)
 
         self.keys = keys if keys else [""]
         
@@ -39,6 +33,8 @@ class GroqFailoverClient:
         self.model_fast    = cfg.groq_model_fast
         self.max_tokens    = cfg.groq_max_tokens
         self.temperature   = cfg.groq_temperature
+        self._sync_clients: dict[str, Groq] = {}
+        self._langchain_clients: dict[tuple[str, str, int, float], ChatGroq] = {}
 
     def _get_active_key(self) -> str:
         """Return the first key that is not in cooldown."""
@@ -71,18 +67,39 @@ class GroqFailoverClient:
         """Return a LangChain ChatGroq instance with the active key."""
         key = self._get_active_key()
         model = self.model_fast if fast else self.model_primary
-        return ChatGroq(
-            api_key=key,
-            model_name=model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            **kwargs
-        )
+        if kwargs:
+            return ChatGroq(
+                api_key=key,
+                model_name=model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                **kwargs
+            )
+        cache_key = (key, model, self.max_tokens, self.temperature)
+        if cache_key not in self._langchain_clients:
+            self._langchain_clients[cache_key] = ChatGroq(
+                api_key=key,
+                model_name=model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        return self._langchain_clients[cache_key]
 
-    def chat(self, messages: list, model: str = None, max_tokens: int = None, temperature: float = None) -> str:
+    def _get_sync_client(self, key: str) -> Groq:
+        if key not in self._sync_clients:
+            self._sync_clients[key] = Groq(api_key=key)
+        return self._sync_clients[key]
+
+    def chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
-        Send a chat request with automatic failover on 429.
-        Retries up to len(self.keys) times before raising.
+        Send a chat request with automatic failover on 429 and return metadata.
         """
         for attempt in range(len(self.keys)):
             key_index = self.current_index
@@ -92,14 +109,31 @@ class GroqFailoverClient:
                 raise ValueError("No GROQ API key is set.")
 
             try:
-                client = Groq(api_key=key)
-                response = client.chat.completions.create(
-                    model=model or self.model_primary,
-                    messages=messages,
-                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                    temperature=temperature if temperature is not None else self.temperature,
-                )
-                return response.choices[0].message.content
+                client = self._get_sync_client(key)
+                kwargs: dict[str, Any] = {
+                    "model": model or self.model_primary,
+                    "messages": messages,
+                    "max_tokens": (
+                        max_tokens if max_tokens is not None else self.max_tokens
+                    ),
+                    "temperature": (
+                        temperature if temperature is not None else self.temperature
+                    ),
+                }
+                if response_format is not None:
+                    kwargs["response_format"] = response_format
+
+                response = client.chat.completions.create(**kwargs)
+                usage = getattr(response, "usage", None)
+                return {
+                    "content": response.choices[0].message.content or "",
+                    "model": getattr(response, "model", kwargs["model"]),
+                    "usage": {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                    },
+                }
 
             except RateLimitError:
                 self._mark_rate_limited(key_index, cooldown_seconds=60)
@@ -115,6 +149,29 @@ class GroqFailoverClient:
                 else:
                     logger.error(f"Groq key {key_index + 1} error: {e}")
                     raise
+
+        raise RuntimeError("Groq chat completion failed after exhausting all keys.")
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Send a chat request with automatic failover on 429.
+        Retries up to len(self.keys) times before raising.
+        """
+        result = self.chat_completion(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            response_format=response_format,
+        )
+        return result["content"]
 
 # ── Singleton — import this everywhere ────────────────────────────
 groq_client = GroqFailoverClient()

@@ -14,6 +14,7 @@ from config.constants import (
     SECTOR_TICKERS, VIX_COMPLACENCY_MAX, VIX_NORMAL_MAX,
     VIX_ELEVATED_MAX, VIX_CIRCUIT_BREAKER, VIX_CRISIS,
 )
+from data.adapters.base_adapter import BaseAdapter
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -27,20 +28,29 @@ def _classify_vix(vix: float) -> str:
     return "CRISIS"
 
 
-class YFinanceClient:
+class YFinanceClient(BaseAdapter):
     """Async-compatible yfinance wrapper. All timestamps in Asia/Kolkata."""
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     def _fetch_sync(self, ticker: str, period: str, interval: str) -> pd.DataFrame:
-        df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
-        if df.empty:
-            raise ValueError(f"yfinance empty for {ticker}")
-        df.index = df.index.tz_convert("Asia/Kolkata")
-        df.columns = df.columns.str.lower()
-        df["ticker"] = ticker
-        df = df.dropna(subset=["close"])
-        logger.info("yfinance.fetched", ticker=ticker, rows=len(df))
-        return df
+        cache_key = self._cache_key("ohlcv", ticker, period, interval)
+        ttl_seconds = settings.yfinance_cache_ttl_minutes * 60
+
+        def _load() -> pd.DataFrame:
+            df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
+            if df.empty:
+                raise ValueError(f"yfinance empty for {ticker}")
+            if getattr(df.index, "tz", None) is None:
+                df.index = df.index.tz_localize("Asia/Kolkata")
+            else:
+                df.index = df.index.tz_convert("Asia/Kolkata")
+            df.columns = df.columns.str.lower()
+            df["ticker"] = ticker
+            df = df.dropna(subset=["close"])
+            logger.info("yfinance.fetched", ticker=ticker, rows=len(df))
+            return df
+
+        return self._cached(key=cache_key, ttl_seconds=ttl_seconds, loader=_load)
 
     async def get_ohlcv(self, ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
         """Async OHLCV. ticker: 'HDFCBANK.NS', '^NSEI', '^INDIAVIX' etc."""

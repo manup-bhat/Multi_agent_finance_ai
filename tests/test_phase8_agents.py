@@ -448,7 +448,8 @@ class TestWorkflowCompilation:
         expected_nodes = {
             "quant_agent", "macro_agent", "fundamental_agent",
             "prediction_agent", "emotion_agent", "fno_agent",
-            "devils_advocate", "risk_node", "orchestrator",
+            "devils_advocate", "risk_node", "validate_orchestrator_inputs",
+            "orchestrator",
         }
         assert expected_nodes.issubset(node_names), (
             f"Missing nodes: {expected_nodes - node_names}"
@@ -458,9 +459,10 @@ class TestWorkflowCompilation:
         """Smoke test: agents package re-exports work."""
         from agents import (
             IndiaEngineState, VALID_VERDICTS, make_empty_state,
-            run_risk_node, workflow, build_workflow,
+            run_risk_node, workflow, build_workflow, get_workflow,
         )
         assert workflow is not None
+        assert get_workflow() is not None
 
     def test_risk_package_importable(self):
         from risk import (

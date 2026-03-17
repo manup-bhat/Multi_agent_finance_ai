@@ -8,8 +8,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import streamlit as st
 import plotly.graph_objects as go
-import pandas as pd, numpy as np, requests, datetime
-from ui_helpers import render_global_sidebar, safe_yf_download, flat_css, render_page_header, render_help_popover
+import pandas as pd, numpy as np, datetime
+from ui_helpers import (
+    render_global_sidebar,
+    safe_yf_download,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_post_json,
+)
 
 API_BASE = "http://localhost:8000"
 
@@ -45,14 +52,11 @@ render_help_popover("Dashboard", """
 
 
 def get_analysis(tkr, hrz, fno):
-    try:
-        r = requests.post(f"{API_BASE}/analyze",
-                          json={"ticker": tkr, "horizon": hrz, "include_fno": fno}, timeout=180)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        st.error(f"Error fetching analysis: {e}")
-    return {}
+    return cached_api_post_json(
+        f"{API_BASE}/analyze",
+        {"ticker": tkr, "horizon": hrz, "include_fno": fno},
+        timeout=180,
+    ) or {}
 
 
 def verdict_color(v):

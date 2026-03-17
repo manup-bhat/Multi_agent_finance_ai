@@ -15,6 +15,7 @@ from agents.emotion_agent import run_emotion_agent
 from agents.fno_agent import run_fno_agent
 from agents.devils_advocate_agent import run_devils_advocate_agent
 from agents.risk_node import run_risk_node
+from agents.validation_node import run_validation_node
 from agents.orchestrator_agent import run_orchestrator_agent
 
 
@@ -27,6 +28,7 @@ node_emotion       = run_emotion_agent
 node_fno           = run_fno_agent
 node_da            = run_devils_advocate_agent
 node_risk          = run_risk_node
+node_validate      = run_validation_node
 node_orchestrator  = run_orchestrator_agent
 
 

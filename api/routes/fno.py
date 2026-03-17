@@ -76,7 +76,7 @@ async def fno_analyze(req: FnORequest):
         spot_symbol = INDEX_SPOT_MAP.get(symbol_clean, req.symbol if "." in req.symbol else f"{symbol_clean}.NS")
         spot_df, chain_df, participant_oi = await asyncio.gather(
             yf_client.get_ohlcv(spot_symbol, period="5d"),
-            nsefin.get_option_chain(symbol_clean),
+            nsefin.get_option_chain(symbol_clean, req.expiry),
             nselib.get_participant_oi(),
             return_exceptions=True,
         )
@@ -90,7 +90,13 @@ async def fno_analyze(req: FnORequest):
             raise ValueError("spot price unavailable")
 
         spot = float(spot_df["close"].iloc[-1])
-        report = build_fno_report(chain_df, spot=spot)
+        resolved_expiry = (
+            str(pd.to_datetime(chain_df["expiry_date"], errors="coerce", dayfirst=True).dropna().iloc[0].date())
+            if "expiry_date" in chain_df.columns
+            and not pd.to_datetime(chain_df["expiry_date"], errors="coerce", dayfirst=True).dropna().empty
+            else (req.expiry or "")
+        )
+        report = build_fno_report(chain_df, spot=spot, expiry_label=resolved_expiry)
         atm_iv = _extract_atm_iv(chain_df, spot)
 
         return {

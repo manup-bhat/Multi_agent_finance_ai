@@ -14,6 +14,8 @@ from __future__ import annotations
 __all__ = [
     "PredictionService",
     "PredictionResult",
+    "get_prediction_service",
+    "preload_prediction_services",
     "ConfidenceCalculator",
     "ModelRouter",
     "TSFMRoute",
@@ -21,10 +23,17 @@ __all__ = [
 ]
 
 try:
-    from prediction.inference.prediction_service import PredictionService, PredictionResult
+    from prediction.inference.prediction_service import (
+        PredictionService,
+        PredictionResult,
+        get_prediction_service,
+        preload_prediction_services,
+    )
 except ImportError:
     PredictionService = None   # type: ignore[assignment,misc]
     PredictionResult  = None   # type: ignore[assignment,misc]
+    get_prediction_service = None  # type: ignore[assignment,misc]
+    preload_prediction_services = None  # type: ignore[assignment,misc]
 
 try:
     from prediction.inference.confidence_calculator import ConfidenceCalculator

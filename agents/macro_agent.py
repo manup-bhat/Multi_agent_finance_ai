@@ -5,7 +5,7 @@ Receives pre-computed macro signals from Phase 7 macro/ module.
 Groq synthesizes them into an India macro market opinion.
 """
 from __future__ import annotations
-import json
+
 import structlog
 from agents.state import IndiaEngineState
 from agents.base_agent import load_prompt, call_groq
@@ -39,6 +39,6 @@ def run_macro_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Macro agent, writes macro_analysis to state."""
     logger.info("macro_agent.start", ticker=state.get("ticker"))
     context = _build_macro_context(state)
-    result = call_groq(_PROMPT, context)
+    result = call_groq(_PROMPT, context, task="macro_agent")
     logger.info("macro_agent.done")
     return {"macro_analysis": result}

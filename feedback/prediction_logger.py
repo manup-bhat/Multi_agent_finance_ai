@@ -34,7 +34,6 @@ Schema (predictions table):
 from __future__ import annotations
 
 import datetime
-import os
 import structlog
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -45,14 +44,13 @@ from sqlalchemy import (
     create_engine, inspect, text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
+settings = get_settings()
 
 # ─── Default DB (SQLite for dev, PostgreSQL for production) ───────────────
-_DEFAULT_DB_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///storage/predictions.db",
-)
+_DEFAULT_DB_URL = settings.database_url or f"sqlite:///{settings.sqlite_path}"
 
 
 # ─── ORM Model ───────────────────────────────────────────────────────────

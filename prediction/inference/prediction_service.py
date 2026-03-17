@@ -14,6 +14,7 @@ Returns a PredictionResult containing:
 """
 from __future__ import annotations
 
+import threading
 import numpy as np
 import pandas as pd
 import shap
@@ -41,6 +42,8 @@ from prediction.inference.model_router import ModelRouter
 logger = structlog.get_logger(__name__)
 
 MODEL_DIR = Path("models/saved")
+_SERVICE_CACHE_LOCK = threading.Lock()
+_SERVICE_CACHE: dict[tuple[str, int, str, str, bool], "PredictionService"] = {}
 
 
 @dataclass
@@ -155,6 +158,135 @@ class PredictionService:
         self._use_bolt     = use_bolt
         self._conf_calc    = ConfidenceCalculator()
         self._router       = ModelRouter()
+        self._fallback_reason: Optional[str] = None
+
+    def _required_model_paths(self) -> list[Path]:
+        """Model artifacts required for the fully-trained inference path."""
+        return [
+            self.model_dir / "xgboost.joblib",
+            self.model_dir / "lightgbm.joblib",
+            self.model_dir / "hmm.joblib",
+            self.model_dir / "ensemble.joblib",
+            self.model_dir / "catboost.cbm",
+            self.model_dir / "catboost.meta",
+        ]
+
+    def _set_untrained_fallback(self, reason: str) -> None:
+        self._fallback_reason = reason
+        self._loaded = True
+        logger.warning(
+            "prediction_service.untrained_ticker_fallback_enabled",
+            ticker=self.ticker,
+            reason=reason,
+        )
+
+    def _build_untrained_ticker_result(
+        self,
+        *,
+        price_series: pd.Series,
+        nifty_returns: pd.Series,
+        vix_current: float,
+    ) -> PredictionResult:
+        """Low-confidence deterministic fallback when model artifacts do not exist."""
+        current_price = float(price_series.iloc[-1])
+        short_window = min(20, len(price_series) - 1) if len(price_series) > 1 else 1
+        long_window = min(60, len(price_series) - 1) if len(price_series) > 1 else 1
+        short_return = (
+            float(price_series.iloc[-1] / price_series.iloc[-(short_window + 1)] - 1.0)
+            if short_window >= 1 and len(price_series) > short_window
+            else 0.0
+        )
+        long_return = (
+            float(price_series.iloc[-1] / price_series.iloc[-(long_window + 1)] - 1.0)
+            if long_window >= 1 and len(price_series) > long_window
+            else short_return
+        )
+        realized_vol = float(price_series.pct_change().dropna().tail(60).std() or 0.02)
+        band = max(0.015, realized_vol * np.sqrt(max(self.horizon, 1)))
+
+        if short_return > 0.02 and long_return > -0.01:
+            direction = "Bullish"
+            direction_class = 3
+            bullish_prob, bearish_prob = 0.46, 0.24
+            class_probs = {
+                "Very Bearish": 0.06,
+                "Bearish": 0.18,
+                "Neutral": 0.30,
+                "Bullish": 0.30,
+                "Very Bullish": 0.16,
+            }
+        elif short_return < -0.02 and long_return < 0.01:
+            direction = "Bearish"
+            direction_class = 1
+            bullish_prob, bearish_prob = 0.24, 0.46
+            class_probs = {
+                "Very Bearish": 0.16,
+                "Bearish": 0.30,
+                "Neutral": 0.30,
+                "Bullish": 0.18,
+                "Very Bullish": 0.06,
+            }
+        else:
+            direction = "Neutral"
+            direction_class = 2
+            bullish_prob, bearish_prob = 0.32, 0.32
+            class_probs = {
+                "Very Bearish": 0.08,
+                "Bearish": 0.24,
+                "Neutral": 0.36,
+                "Bullish": 0.24,
+                "Very Bullish": 0.08,
+            }
+
+        drift = (0.25 * short_return) + (0.15 * long_return)
+        p50 = current_price * (1.0 + drift)
+        p10 = current_price * (1.0 - band)
+        p90 = current_price * (1.0 + band)
+
+        if len(nifty_returns) >= 21:
+            nifty_move = float(nifty_returns.tail(21).sum())
+            regime_name = "Bull" if nifty_move > 0.03 else "Bear" if nifty_move < -0.03 else "Sideways"
+        else:
+            regime_name = "Sideways"
+
+        result = PredictionResult(
+            ticker=self.ticker,
+            current_price=current_price,
+            timestamp=pd.Timestamp.now(tz=MARKET_TZ),
+            forecast_5d=p50 if self.horizon == 5 else current_price,
+            forecast_10d=p50 if self.horizon == 10 else current_price,
+            forecast_30d=p50 if self.horizon == 30 else current_price,
+            q10_5d=p10,
+            q90_5d=p90,
+            return_pct_5d=((p50 / current_price) - 1.0) * 100.0 if current_price else 0.0,
+            direction=direction,
+            direction_class=direction_class,
+            bullish_prob=bullish_prob,
+            bearish_prob=bearish_prob,
+            confidence=0.35,
+            class_probs=class_probs,
+            regime_name=regime_name,
+            regime_id=1,
+            is_high_confidence=False,
+            vix_circuit_breaker=vix_current >= VIX_CIRCUIT_BREAKER,
+            vix_level=vix_current,
+            top_features=[
+                {
+                    "feature": "MODEL_AVAILABILITY",
+                    "value": 0.0,
+                    "impact": -1.0,
+                },
+                {
+                    "feature": "RECENT_RETURN_20D",
+                    "value": round(short_return, 4),
+                    "impact": round(short_return, 4),
+                },
+            ],
+            chronos_dir_5d=0.5,
+            chronos_dir_10d=0.5,
+            chronos_dir_30d=0.5,
+        )
+        return result
 
     def load_models(self) -> None:
         """Load all trained models from disk. Call once at startup."""
@@ -162,6 +294,13 @@ class PredictionService:
             return
 
         logger.info("prediction_service.loading", ticker=self.ticker)
+
+        missing_artifacts = [path for path in self._required_model_paths() if not path.exists()]
+        if missing_artifacts:
+            self._set_untrained_fallback(
+                "Missing model artifacts: " + ", ".join(path.name for path in missing_artifacts)
+            )
+            return
 
         # Gradient boosters
         self._xgb = XGBoostPredictor(horizon=self.horizon)
@@ -191,6 +330,19 @@ class PredictionService:
 
         self._loaded = True
         logger.info("prediction_service.loaded", ticker=self.ticker, horizon=self.horizon)
+
+    def prewarm_runtime(self, include_chronos: bool = False) -> None:
+        """Load reusable model state before the first request hits this service."""
+        self.load_models()
+        if include_chronos and self._chronos is not None:
+            try:
+                self._chronos._load_pipeline()
+            except Exception as exc:
+                logger.warning(
+                    "prediction_service.chronos_prewarm_failed",
+                    ticker=self.ticker,
+                    error=str(exc),
+                )
 
     def predict(
         self,
@@ -225,6 +377,13 @@ class PredictionService:
             timestamp=pd.Timestamp.now(tz=MARKET_TZ),
             vix_level=vix_current,
         )
+
+        if self._fallback_reason is not None:
+            return self._build_untrained_ticker_result(
+                price_series=price_series,
+                nifty_returns=nifty_returns,
+                vix_current=vix_current,
+            )
 
         # ── Gate 1: VIX Circuit Breaker (deterministic — no LLM) ─────────────
         result.vix_circuit_breaker = vix_current >= VIX_CIRCUIT_BREAKER
@@ -369,3 +528,93 @@ class PredictionService:
         elif dirs[0] == dirs[1] or dirs[1] == dirs[2] or dirs[0] == dirs[2]:
             return 2
         return 1
+
+
+def _service_cache_key(
+    *,
+    ticker: str,
+    horizon: int,
+    model_dir: Path,
+    chronos_size: str,
+    use_bolt: bool,
+) -> tuple[str, int, str, str, bool]:
+    return (ticker.upper(), int(horizon), str(Path(model_dir).resolve()), chronos_size, bool(use_bolt))
+
+
+def get_prediction_service(
+    *,
+    ticker: str,
+    horizon: int = 5,
+    model_dir: Path = MODEL_DIR,
+    chronos_size: str = "small",
+    use_bolt: bool = False,
+) -> PredictionService:
+    key = _service_cache_key(
+        ticker=ticker,
+        horizon=horizon,
+        model_dir=model_dir,
+        chronos_size=chronos_size,
+        use_bolt=use_bolt,
+    )
+    with _SERVICE_CACHE_LOCK:
+        service = _SERVICE_CACHE.get(key)
+        if service is None:
+            service = PredictionService(
+                ticker=ticker,
+                horizon=horizon,
+                model_dir=model_dir,
+                chronos_size=chronos_size,
+                use_bolt=use_bolt,
+            )
+            _SERVICE_CACHE[key] = service
+        return service
+
+
+def discover_prediction_targets(model_root: Path = MODEL_DIR) -> list[tuple[str, int]]:
+    targets: list[tuple[str, int]] = []
+    root = Path(model_root)
+    if not root.exists():
+        return targets
+
+    for ticker_dir in root.iterdir():
+        if not ticker_dir.is_dir():
+            continue
+        for horizon_dir in ticker_dir.iterdir():
+            if not horizon_dir.is_dir() or not horizon_dir.name.startswith("h"):
+                continue
+            try:
+                horizon = int(horizon_dir.name[1:])
+            except ValueError:
+                continue
+            ticker = ticker_dir.name
+            if ticker.endswith("_NS"):
+                ticker = ticker[:-3] + ".NS"
+            elif ticker.endswith("_BO"):
+                ticker = ticker[:-3] + ".BO"
+            targets.append((ticker, horizon))
+    return sorted(set(targets))
+
+
+def preload_prediction_services(
+    *,
+    model_root: Path = MODEL_DIR,
+    include_chronos: bool = False,
+) -> list[tuple[str, int]]:
+    warmed: list[tuple[str, int]] = []
+    for ticker, horizon in discover_prediction_targets(model_root):
+        service = get_prediction_service(
+            ticker=ticker,
+            horizon=horizon,
+            model_dir=model_root,
+        )
+        try:
+            service.prewarm_runtime(include_chronos=include_chronos)
+            warmed.append((ticker, horizon))
+        except Exception as exc:
+            logger.warning(
+                "prediction_service.prewarm_failed",
+                ticker=ticker,
+                horizon=horizon,
+                error=str(exc),
+            )
+    return warmed

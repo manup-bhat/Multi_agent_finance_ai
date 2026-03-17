@@ -1,83 +1,93 @@
 """
 LangGraph Workflow — 9-Agent India Engine State Machine
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Graph topology:
-  START
-    │
-    ├──► quant_agent      ──┐
-    ├──► macro_agent      ──┤
-    ├──► fundamental_agent──┤  (parallel fan-out)
-    ├──► prediction_agent ──┤
-    ├──► emotion_agent    ──┤
-    └──► fno_agent        ──┘
-                             │
-                       devils_advocate  (needs all 6 above)
-                             │
-                          risk_node    (pure Python — no LLM)
-                             │
-                        orchestrator   (Gemini 2.5 Pro)
-                             │
-                            END
-
-Note: LangGraph v0.2+ uses `add_node` / `add_edge` / `add_conditional_edges`.
-The 6 parallel nodes are connected via separate edges from START.
-LangGraph automatically parallelises nodes with no dependency between them.
 """
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, START, END
+from functools import lru_cache
+from typing import Any
+
+import structlog
+from langgraph.graph import END, START, StateGraph
 
 from agents.state import IndiaEngineState
-from agents.graph.nodes import (
-    node_quant, node_macro, node_fundamental,
-    node_prediction, node_emotion, node_fno,
-    node_da, node_risk, node_orchestrator,
-)
+
+logger = structlog.get_logger(__name__)
+
+DOMAIN_AGENT_NAMES = [
+    "quant_agent",
+    "macro_agent",
+    "fundamental_agent",
+    "prediction_agent",
+    "emotion_agent",
+    "fno_agent",
+]
 
 
-def build_workflow() -> StateGraph:
+def build_workflow():
     """
-    Build and compile the 9-agent LangGraph workflow.
+    Build and compile the LangGraph workflow.
 
-    Returns:
-        Compiled Runnable that can be invoked with an IndiaEngineState dict.
+    Parallel domain agents fan out from START, then join exactly once into the
+    devil's advocate node, followed by risk, validation, and orchestration.
     """
+    from agents.graph.nodes import (
+        node_da,
+        node_emotion,
+        node_fno,
+        node_fundamental,
+        node_macro,
+        node_orchestrator,
+        node_prediction,
+        node_quant,
+        node_risk,
+        node_validate,
+    )
+
     graph = StateGraph(IndiaEngineState)
 
-    # ── Register all nodes ─────────────────────────────────────────
-    graph.add_node("quant_agent",         node_quant)
-    graph.add_node("macro_agent",         node_macro)
-    graph.add_node("fundamental_agent",   node_fundamental)
-    graph.add_node("prediction_agent",    node_prediction)
-    graph.add_node("emotion_agent",       node_emotion)
-    graph.add_node("fno_agent",           node_fno)
-    graph.add_node("devils_advocate",     node_da)
-    graph.add_node("risk_node",           node_risk)
-    graph.add_node("orchestrator",        node_orchestrator)
+    graph.add_node("quant_agent", node_quant)
+    graph.add_node("macro_agent", node_macro)
+    graph.add_node("fundamental_agent", node_fundamental)
+    graph.add_node("prediction_agent", node_prediction)
+    graph.add_node("emotion_agent", node_emotion)
+    graph.add_node("fno_agent", node_fno)
+    graph.add_node("devils_advocate", node_da)
+    graph.add_node("risk_node", node_risk)
+    graph.add_node("validate_orchestrator_inputs", node_validate)
+    graph.add_node("orchestrator", node_orchestrator)
 
-    # ── Parallel fan-out: START → 6 domain agents ─────────────────
-    for agent in [
-        "quant_agent", "macro_agent", "fundamental_agent",
-        "prediction_agent", "emotion_agent", "fno_agent",
-    ]:
+    for agent in DOMAIN_AGENT_NAMES:
         graph.add_edge(START, agent)
 
-    # ── Sequential: all 6 → devil's advocate ──────────────────────
-    for agent in [
-        "quant_agent", "macro_agent", "fundamental_agent",
-        "prediction_agent", "emotion_agent", "fno_agent",
-    ]:
-        graph.add_edge(agent, "devils_advocate")
-
-    # ── Sequential chain: DA → Risk → Orchestrator → END ──────────
+    graph.add_edge(DOMAIN_AGENT_NAMES, "devils_advocate")
     graph.add_edge("devils_advocate", "risk_node")
-    graph.add_edge("risk_node",       "orchestrator")
-    graph.add_edge("orchestrator",    END)
+    graph.add_edge("risk_node", "validate_orchestrator_inputs")
+    graph.add_edge("validate_orchestrator_inputs", "orchestrator")
+    graph.add_edge("orchestrator", END)
 
     return graph.compile()
 
 
-# Module-level compiled workflow (import this for use in API/CLI)
-workflow = build_workflow()
+@lru_cache(maxsize=1)
+def get_workflow():
+    """Lazy cached workflow factory used by API and module proxy."""
+    try:
+        return build_workflow()
+    except Exception as exc:
+        logger.exception("workflow.build_failed", error=str(exc))
+        raise RuntimeError(f"Failed to build LangGraph workflow: {exc}") from exc
 
-__all__ = ["workflow", "build_workflow"]
+
+class _LazyWorkflowProxy:
+    """Compatibility proxy that delays workflow compilation until first use."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_workflow(), name)
+
+    def __repr__(self) -> str:
+        return "<LazyWorkflowProxy for agents.graph.workflow.get_workflow()>"
+
+
+workflow = _LazyWorkflowProxy()
+
+__all__ = ["workflow", "build_workflow", "get_workflow"]

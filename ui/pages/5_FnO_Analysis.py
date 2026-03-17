@@ -2,8 +2,14 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np, requests
-from ui_helpers import render_global_sidebar, flat_css, render_page_header, render_help_popover
+import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np
+from ui_helpers import (
+    render_global_sidebar,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_post_json,
+)
 
 st.set_page_config(page_title="F&O · India Engine", page_icon="⚡", layout="wide")
 flat_css(); st.session_state["_page_id"] = "fno"
@@ -29,13 +35,11 @@ render_help_popover("F&O Analysis","""
 """)
 
 def get_fno(sym):
-    try:
-        r = requests.post(f"{API_BASE}/fno/analyze", json={"symbol":sym}, timeout=10)
-        if r.status_code==200:
-            return r.json()
-    except Exception:
-        pass
-    return None
+    return cached_api_post_json(
+        f"{API_BASE}/fno/analyze",
+        {"symbol": sym},
+        timeout=10,
+    )
 
 prev = st.session_state.get("fno_symbol","")
 if prev != symbol or "fno_data" not in st.session_state:

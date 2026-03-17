@@ -26,6 +26,7 @@ import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 import structlog
 from config.settings import get_settings
+from data.adapters.base_adapter import BaseAdapter
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -87,7 +88,7 @@ def _pivot_fii_dii(data: list[dict]) -> pd.DataFrame:
     return df.sort_index()
 
 
-class NSELibClient:
+class NSELibClient(BaseAdapter):
 
     def _delay(self) -> None:
         time.sleep(random.uniform(
@@ -101,30 +102,36 @@ class NSELibClient:
         NSE /api/fiidiiTradeReact — confirmed returning 2-row list.
         Pivot category rows → wide FII/DII columns.
         """
-        from data.adapters.nse_session import nse_get_json
-        self._delay()
-        data = nse_get_json("/fiidiiTradeReact", timeout=settings.nse_timeout_seconds)
+        cache_key = self._cache_key("fii_dii")
+        ttl_seconds = settings.nselib_cache_ttl_seconds
 
-        if not isinstance(data, list) or len(data) == 0:
-            raise ValueError(
-                f"FII/DII: expected list, got {type(data).__name__}. "
-                f"Value: {str(data)[:100]}"
+        def _load() -> pd.DataFrame:
+            from data.adapters.nse_session import nse_get_json
+
+            self._delay()
+            data = nse_get_json("/fiidiiTradeReact", timeout=settings.nse_timeout_seconds)
+
+            if not isinstance(data, list) or len(data) == 0:
+                raise ValueError(
+                    f"FII/DII: expected list, got {type(data).__name__}. "
+                    f"Value: {str(data)[:100]}"
+                )
+
+            df = _pivot_fii_dii(data)
+            if df.empty:
+                raise ValueError("FII/DII: empty DataFrame after pivot")
+
+            logger.info(
+                "nselib.fii_dii_fetched",
+                rows=len(df),
+                cols=list(df.columns),
+                source="nse_direct_pivot",
+                latest_fii_net=float(df["fii_net_value"].iloc[-1]),
+                latest_dii_net=float(df["dii_net_value"].iloc[-1]),
             )
+            return df
 
-        df = _pivot_fii_dii(data)
-
-        if df.empty:
-            raise ValueError("FII/DII: empty DataFrame after pivot")
-
-        logger.info(
-            "nselib.fii_dii_fetched",
-            rows=len(df),
-            cols=list(df.columns),
-            source="nse_direct_pivot",
-            latest_fii_net=float(df["fii_net_value"].iloc[-1]),
-            latest_dii_net=float(df["dii_net_value"].iloc[-1]),
-        )
-        return df
+        return self._cached(key=cache_key, ttl_seconds=ttl_seconds, loader=_load)
 
     async def get_fii_dii(self, days: int = 90) -> pd.DataFrame:
         """FII/DII cash market — direct NSE API with pivot."""

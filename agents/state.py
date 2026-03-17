@@ -14,7 +14,24 @@ Design principles:
 """
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Optional, TypedDict
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Verdict(str, Enum):
+    STRONG_BUY = "STRONG_BUY"
+    BUY = "BUY"
+    HOLD = "HOLD"
+    SELL = "SELL"
+    STRONG_SELL = "STRONG_SELL"
+
+
+class Regime(str, Enum):
+    BULL = "BULL"
+    BEAR = "BEAR"
+    SIDEWAYS = "SIDEWAYS"
 
 
 class IndiaEngineState(TypedDict, total=False):
@@ -44,7 +61,8 @@ class IndiaEngineState(TypedDict, total=False):
     fii_dii_report: dict[str, Any]   # FIIDIIReport as dict
     global_cues: dict[str, Any]      # GlobalCuesReport as dict
     event_impact: dict[str, Any]     # EventImpactReport as dict
-    market_regime: str               # "BULL" | "BEAR" | "SIDEWAYS" (HMM)
+    market_calendar: dict[str, Any]  # Trading-day / event-window context
+    market_regime: Regime | str      # "BULL" | "BEAR" | "SIDEWAYS" (HMM)
 
     # ── Pre-computed F&O inputs (from Phase 6 fno/) ───────────────
     fno_report: dict[str, Any]       # FnO reporter dict
@@ -55,7 +73,9 @@ class IndiaEngineState(TypedDict, total=False):
     smc_summary: str                 # BOS/CHoCH/OB/FVG summary text
     prediction_summary: str          # Ensemble forecast text (no numbers, interpretive)
     sentiment_summary: str           # Composite FinBERT + Fear/Greed text
+    composite_sent: dict[str, Any]   # Structured sentiment metrics for risk / DA
     fundamental_summary: str         # News + SEBI + corporate actions text
+    fundamental_documents: list[dict[str, Any]]  # Optional docs for RAG indexing
 
     # ── Agent outputs (each agent writes exactly one key) ─────────
     quant_analysis: str              # Quant agent (TA + SMC synthesis)
@@ -68,10 +88,11 @@ class IndiaEngineState(TypedDict, total=False):
 
     # ── Risk node output (pure Python, no LLM) ────────────────────
     risk_node_output: dict[str, Any] # See RiskNodeOutput structure
+    workflow_validation: dict[str, Any]  # Pre-orchestrator readiness checks
 
     # ── Orchestrator final output ──────────────────────────────────
     orchestrator_report: str         # Full Gemini-synthesized report text
-    verdict: str                     # "STRONG_BUY"|"BUY"|"HOLD"|"SELL"|"STRONG_SELL"
+    verdict: Verdict | str           # "STRONG_BUY"|"BUY"|"HOLD"|"SELL"|"STRONG_SELL"
     confidence: float                # 0.0 – 1.0
     price_targets: dict[str, float]  # {"p10": x, "p50": y, "p90": z}
     recommended_strategy: str        # F&O strategy name
@@ -82,12 +103,10 @@ class IndiaEngineState(TypedDict, total=False):
 
 
 # Valid verdict values (used for validation in tests)
-VALID_VERDICTS = frozenset(
-    {"STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL"}
-)
+VALID_VERDICTS = tuple(verdict.value for verdict in Verdict)
 
 # Valid regime labels
-VALID_REGIMES = frozenset({"BULL", "BEAR", "SIDEWAYS"})
+VALID_REGIMES = tuple(regime.value for regime in Regime)
 
 # Required keys in risk_node_output
 RISK_NODE_REQUIRED_KEYS = frozenset({
@@ -117,13 +136,66 @@ REPORT_REQUIRED_SECTIONS = [
 ]
 
 
+class IndiaEngineStateModel(BaseModel):
+    """
+    Runtime validator for shared state payloads.
+
+    LangGraph still passes plain dict state between nodes, so this model is used
+    as a validation layer rather than as the state container itself.
+    """
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    ticker: str = ""
+    horizon: int = 5
+    analysis_date: str
+    market_regime: Regime | None = None
+    verdict: Verdict | None = None
+    confidence: float | None = None
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    price_targets: dict[str, float | None] = Field(default_factory=dict)
+    fno_report: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("analysis_date")
+    @classmethod
+    def _validate_analysis_date(cls, value: str) -> str:
+        from datetime import date
+
+        date.fromisoformat(value)
+        return value
+
+    @field_validator("horizon")
+    @classmethod
+    def _validate_horizon(cls, value: int) -> int:
+        if value < 1 or value > 30:
+            raise ValueError("horizon must be between 1 and 30")
+        return value
+
+    @field_validator("confidence")
+    @classmethod
+    def _validate_confidence(cls, value: float | None) -> float | None:
+        if value is None:
+            return value
+        if value < 0.0 or value > 1.0:
+            raise ValueError("confidence must be between 0.0 and 1.0")
+        return value
+
+
+def validate_state_payload(state: dict[str, Any]) -> IndiaEngineState:
+    """Validate and normalize a state dict without changing the graph contract."""
+    model = IndiaEngineStateModel.model_validate(state)
+    return model.model_dump(exclude_none=True)
+
+
 def make_empty_state(ticker: str = "", horizon: int = 5) -> IndiaEngineState:
     """Create a minimal valid state for testing."""
-    from datetime import date
+    from config.india_calendar import get_last_trading_day
+
     return IndiaEngineState(
         ticker=ticker,
         horizon=horizon,
-        analysis_date=str(date.today()),
+        analysis_date=str(get_last_trading_day()),
         errors=[],
         warnings=[],
     )

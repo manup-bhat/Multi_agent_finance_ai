@@ -15,7 +15,7 @@ from data.adapters.nselib_client import NSELibClient
 from data.adapters.yfinance_client import YFinanceClient
 from features.covariate_builder import build_chronos_covariates
 from features.india_feature_set import IndiaFeatureSet
-from prediction.inference.prediction_service import PredictionService
+from prediction.inference.prediction_service import get_prediction_service
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -84,29 +84,34 @@ def _statistical_live_forecast(price_series: pd.Series, horizon: int) -> dict[st
     }
 
 
-async def build_live_prediction_response(req: PredictRequest) -> PredictResponse:
-    yf = YFinanceClient()
-    nselib = NSELibClient()
+def _fallback_response(
+    *,
+    req: PredictRequest,
+    price_series: pd.Series,
+    model_used: str,
+) -> PredictResponse:
+    fallback = _statistical_live_forecast(price_series, req.horizon)
+    if req.regime:
+        fallback["regime"] = req.regime
+    fallback["model_used"] = model_used
+    return PredictResponse(ticker=req.ticker, horizon=req.horizon, **fallback)
 
-    ohlcv_df, macro_df, nifty_df, fii_df, vix_df = await asyncio.gather(
-        yf.get_ohlcv(req.ticker, period="3y"),
-        yf.get_macro_snapshot(period="3y"),
-        yf.get_ohlcv("^NSEI", period="3y"),
-        nselib.get_fii_dii(),
-        yf.get_india_vix(period="3y"),
-        return_exceptions=True,
-    )
 
-    if isinstance(ohlcv_df, Exception):
-        raise ohlcv_df
+async def build_live_prediction_from_frames(
+    req: PredictRequest,
+    *,
+    ohlcv_df: pd.DataFrame,
+    macro_df: pd.DataFrame,
+    nifty_df: pd.DataFrame | Exception | None,
+    fii_df: pd.DataFrame | Exception | None,
+    vix_df: pd.DataFrame | Exception | None,
+) -> PredictResponse:
     if ohlcv_df.empty:
         raise ValueError(f"no live OHLCV for {req.ticker}")
-
-    if isinstance(macro_df, Exception) or macro_df is None or macro_df.empty:
+    if macro_df is None or macro_df.empty:
         raise ValueError("macro snapshot unavailable")
 
     price_series = ohlcv_df["close"].copy()
-
     feature_builder = IndiaFeatureSet()
     features = feature_builder.build(
         ohlcv_df=ohlcv_df,
@@ -116,11 +121,26 @@ async def build_live_prediction_response(req: PredictRequest) -> PredictResponse
         sector_df=None,
     ).dropna(how="all")
 
+    validation = feature_builder.validate(features, price_series)
+    if not validation.passed:
+        logger.warning(
+            "api.predict.feature_validation_failed",
+            ticker=req.ticker,
+            same_day_leaks=validation.same_day_leaks,
+            null_columns=validation.null_columns,
+        )
+        return _fallback_response(
+            req=req,
+            price_series=price_series,
+            model_used="feature_validation_fallback",
+        )
+
     if len(features) < 120:
-        fallback = _statistical_live_forecast(price_series, req.horizon)
-        if req.regime:
-            fallback["regime"] = req.regime
-        return PredictResponse(ticker=req.ticker, horizon=req.horizon, **fallback)
+        return _fallback_response(
+            req=req,
+            price_series=price_series,
+            model_used="statistical_live_fallback",
+        )
 
     covariates = build_chronos_covariates(features, price_series)
     nifty_returns = (
@@ -135,7 +155,11 @@ async def build_live_prediction_response(req: PredictRequest) -> PredictResponse
     vix_current = float(vix_series.iloc[-1]) if vix_series is not None else 15.0
 
     try:
-        service = PredictionService(ticker=req.ticker, horizon=req.horizon, model_dir=MODEL_ROOT)
+        service = get_prediction_service(
+            ticker=req.ticker,
+            horizon=req.horizon,
+            model_dir=MODEL_ROOT,
+        )
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
@@ -175,10 +199,41 @@ async def build_live_prediction_response(req: PredictRequest) -> PredictResponse
         )
     except Exception as exc:
         logger.warning("api.predict.live_model_unavailable", ticker=req.ticker, error=str(exc))
-        fallback = _statistical_live_forecast(price_series, req.horizon)
-        if req.regime:
-            fallback["regime"] = req.regime
-        return PredictResponse(ticker=req.ticker, horizon=req.horizon, **fallback)
+        return _fallback_response(
+            req=req,
+            price_series=price_series,
+            model_used="statistical_live_fallback",
+        )
+
+
+async def build_live_prediction_response(req: PredictRequest) -> PredictResponse:
+    yf = YFinanceClient()
+    nselib = NSELibClient()
+
+    ohlcv_df, macro_df, nifty_df, fii_df, vix_df = await asyncio.gather(
+        yf.get_ohlcv(req.ticker, period="3y"),
+        yf.get_macro_snapshot(period="3y"),
+        yf.get_ohlcv("^NSEI", period="3y"),
+        nselib.get_fii_dii(),
+        yf.get_india_vix(period="3y"),
+        return_exceptions=True,
+    )
+
+    if isinstance(ohlcv_df, Exception):
+        raise ohlcv_df
+    if ohlcv_df.empty:
+        raise ValueError(f"no live OHLCV for {req.ticker}")
+
+    if isinstance(macro_df, Exception) or macro_df is None or macro_df.empty:
+        raise ValueError("macro snapshot unavailable")
+    return await build_live_prediction_from_frames(
+        req,
+        ohlcv_df=ohlcv_df,
+        macro_df=macro_df,
+        nifty_df=nifty_df,
+        fii_df=fii_df,
+        vix_df=vix_df,
+    )
 
 
 @router.post("/predict", response_model=PredictResponse)

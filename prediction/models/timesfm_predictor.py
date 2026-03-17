@@ -29,8 +29,12 @@ import torch
 logger = structlog.get_logger(__name__)
 
 # ── Version-aware import ──────────────────────────────────────────────────────
-_TIMESFM_VERSION = importlib.metadata.version("timesfm")
-_TIMESFM_MAJOR = int(_TIMESFM_VERSION.split(".")[0])
+try:
+    _TIMESFM_VERSION = importlib.metadata.version("timesfm")
+    _TIMESFM_MAJOR = int(_TIMESFM_VERSION.split(".")[0])
+except importlib.metadata.PackageNotFoundError:
+    _TIMESFM_VERSION = "not_installed"
+    _TIMESFM_MAJOR = 0
 
 try:
     import timesfm  # noqa

@@ -15,7 +15,6 @@ Design rules:
 """
 from __future__ import annotations
 
-import os
 import structlog
 from pathlib import Path
 from typing import Optional
@@ -37,6 +36,7 @@ def load_prompt(agent_name: str) -> str:
 def call_groq(
     system_prompt: str,
     user_message: str,
+    task: str = "generic_agent",
     model: Optional[str] = None,
     max_tokens: int = 1024,
     temperature: float = 0.1,
@@ -46,21 +46,34 @@ def call_groq(
     On error, returns a degraded placeholder string (never raises).
     """
     try:
-        from utils.groq_client import groq_client
+        from utils.llm_router import llm_router
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ]
-        
-        # Automatically uses key 1, falls back to key 2 on rate limit
-        response = groq_client.chat(
-            messages=messages,
-            model=model,
+        if model is not None:
+            logger.warning(
+                "call_groq.explicit_model_bypasses_router",
+                task=task,
+                model=model,
+            )
+            from utils.groq_client import groq_client
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ]
+            return groq_client.chat(
+                messages=messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        return llm_router.route_agent_call(
+            task=task,
+            system_prompt=system_prompt,
+            user_message=user_message,
             max_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
         )
-        return response
 
     except Exception as exc:
         logger.warning("groq_call.failed", error=str(exc))
@@ -70,6 +83,7 @@ def call_groq(
 def call_gemini(
     system_prompt: str,
     user_message: str,
+    task: str = "orchestrator",
     max_tokens: int = 4096,
     temperature: float = 0.1,
 ) -> str:
@@ -78,37 +92,16 @@ def call_gemini(
     On error, returns a degraded placeholder string (never raises).
     """
     try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        from langchain_core.messages import SystemMessage, HumanMessage
-        from config.settings import get_settings
+        from utils.llm_router import llm_router
 
-        cfg = get_settings()
-        if not cfg.google_api_key:
-            return "[GOOGLE_API_KEY_NOT_SET] Orchestrator unavailable."
-
-        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_message)]
-        try:
-            llm = ChatGoogleGenerativeAI(
-                model=cfg.gemini_model,
-                google_api_key=cfg.google_api_key,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-            )
-            response = llm.invoke(messages)
-            return response.content
-        except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                logger.warning("gemini_call.quota_exceeded", falling_back_to=cfg.gemini_model_fast)
-                llm = ChatGoogleGenerativeAI(
-                    model=cfg.gemini_model_fast,
-                    google_api_key=cfg.google_api_key,
-                    max_output_tokens=max_tokens,
-                    temperature=temperature,
-                )
-                response = llm.invoke(messages)
-                return response.content
-            else:
-                raise e
+        if task != "orchestrator":
+            logger.warning("call_gemini.unexpected_task", task=task)
+        return llm_router.route_orchestrator_call(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
     except Exception as exc:
         logger.warning("gemini_call.failed", error=str(exc))

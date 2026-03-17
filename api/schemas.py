@@ -53,6 +53,15 @@ class AnalyzeResponse(BaseModel):
     key_risks:      list[str]
     circuit_breaker_active: bool
     vix_current:    Optional[float]
+    fii_net_5d:     Optional[float] = None
+    fear_greed_index: Optional[float] = None
+    social_bullish_pct: Optional[float] = None
+    social_post_volume: Optional[int] = None
+    euphoria_flag: Optional[bool] = None
+    sentiment_window: Optional[int] = None
+    recommended_strategy: Optional[str] = None
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 class PredictResponse(BaseModel):
     ticker:             str

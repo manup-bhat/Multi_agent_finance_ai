@@ -11,6 +11,7 @@ KEY ARCHITECTURE NOTE:
 from __future__ import annotations
 import io, contextlib
 import streamlit as st
+import requests
 
 # ── Verified NSE tickers on Yahoo Finance ─────────────────────────────────
 QUICK_PICKS = [
@@ -166,6 +167,7 @@ def suppress_yf_print():
         yield
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def safe_yf_download(ticker: str, period: str = "6mo", interval: str = "1d"):
     """Download yfinance data safely: suppress print noise + flatten multi-level cols.
     Returns empty DataFrame on failure.
@@ -184,3 +186,23 @@ def safe_yf_download(ticker: str, period: str = "6mo", interval: str = "1d"):
         import structlog
         structlog.get_logger(__name__).warning("safe_yf_download_failed", error=str(e), ticker=ticker)
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def cached_api_get_json(url: str, timeout: int = 15):
+    try:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def cached_api_post_json(url: str, payload: dict, timeout: int = 30):
+    try:
+        response = requests.post(url, json=payload, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None

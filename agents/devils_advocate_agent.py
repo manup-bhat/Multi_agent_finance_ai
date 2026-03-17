@@ -30,6 +30,13 @@ def _build_da_context(state: IndiaEngineState) -> str:
     amplified = _should_amplify(state)
     vix_signal = state.get("vix_signal", {})
     vix = vix_signal.get("current_vix", "N/A") if vix_signal else "N/A"
+    composite_sent = state.get("composite_sent", {}) or {}
+    fii_report = state.get("fii_dii_report", {}) or {}
+    fear_greed = composite_sent.get("fear_greed_index", composite_sent.get("fear_greed", "N/A"))
+    social_volume = composite_sent.get("social_post_volume", "N/A")
+    euphoria_flag = composite_sent.get("euphoria_flag", False)
+    fii_streak = fii_report.get("sell_streak_days", fii_report.get("consecutive_sell_days", "N/A"))
+    confidence = state.get("confidence", 0.0) or 0.0
 
     # Gather all agent verdicts for consensus picture
     analyses = {
@@ -50,11 +57,20 @@ def _build_da_context(state: IndiaEngineState) -> str:
         "Your contrarian analysis carries extra weight this session."
         if amplified else ""
     )
+    trigger_note = (
+        f"\n\n=== AMPLIFICATION TRIGGERS ===\n"
+        f"Prediction confidence: {confidence:.1%}\n"
+        f"Fear/Greed index: {fear_greed}\n"
+        f"Social volume: {social_volume}\n"
+        f"Euphoria flag: {euphoria_flag}\n"
+        f"FII sell streak: {fii_streak}\n"
+    )
 
     return (
         f"TICKER: {ticker} | INDIA VIX: {vix}\n"
         f"{amplify_note}\n\n"
         f"=== CONSENSUS FROM OTHER AGENTS ===\n{consensus}\n\n"
+        f"{trigger_note}\n"
         f"Challenge this consensus with rigorous contrarian arguments.\n"
     )
 
@@ -63,6 +79,6 @@ def run_devils_advocate_agent(state: IndiaEngineState) -> dict:
     """LangGraph node: runs Devil's Advocate."""
     logger.info("devils_advocate_agent.start", ticker=state.get("ticker"))
     context = _build_da_context(state)
-    result = call_groq(_PROMPT, context)
+    result = call_groq(_PROMPT, context, task="devils_advocate_agent")
     logger.info("devils_advocate_agent.done")
     return {"devils_advocate_analysis": result}

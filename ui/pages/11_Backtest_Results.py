@@ -2,8 +2,14 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np, datetime, requests
-from ui_helpers import render_global_sidebar, flat_css, render_page_header, render_help_popover
+import streamlit as st, plotly.graph_objects as go, pandas as pd, numpy as np, datetime
+from ui_helpers import (
+    render_global_sidebar,
+    flat_css,
+    render_page_header,
+    render_help_popover,
+    cached_api_post_json,
+)
 
 st.set_page_config(page_title="Backtest · India Engine", page_icon="📈", layout="wide")
 flat_css(); st.session_state["_page_id"] = "backtest"
@@ -38,13 +44,11 @@ render_help_popover("Backtest Results","""
 """)
 
 def get_backtest(strat, tkr, yrs):
-    try:
-        r=requests.post(f"{API_BASE}/backtest",json={"strategy":strat,"ticker":tkr,"years":yrs},timeout=60)
-        if r.status_code==200:
-            return r.json()
-    except Exception as e: 
-        st.error(f"Failed to fetch real backtest data: {str(e)}")
-    return None
+    return cached_api_post_json(
+        f"{API_BASE}/backtest",
+        {"strategy": strat, "ticker": tkr, "years": yrs},
+        timeout=60,
+    )
 
 prev_t=st.session_state.get("bt_ticker",""); prev_s=st.session_state.get("bt_strategy","")
 if run_btn_val or prev_t!=ticker or prev_s!=strat_val or "bt_data" not in st.session_state:

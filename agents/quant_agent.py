@@ -31,6 +31,6 @@ def run_quant_agent(state: IndiaEngineState) -> IndiaEngineState:
     """LangGraph node: runs Quant agent, writes quant_analysis to state."""
     logger.info("quant_agent.start", ticker=state.get("ticker"))
     context = _build_quant_context(state)
-    result = call_groq(_PROMPT, context)
+    result = call_groq(_PROMPT, context, task="quant_agent")
     logger.info("quant_agent.done")
     return {"quant_analysis": result}
