@@ -1,77 +1,96 @@
 """POST /backtest — run strategy backtest using Phase 9 engine."""
-from fastapi import APIRouter
-from api.schemas import BacktestRequest, BacktestResponse
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+import pandas as pd
 import structlog
+
+from api.schemas import BacktestRequest, BacktestResponse
+from data.adapters.nselib_client import NSELibClient
+from data.adapters.yfinance_client import YFinanceClient
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
+INDEX_TICKER_MAP = {
+    "BANKNIFTY": "^NSEBANK",
+    "NIFTY": "^NSEI",
+    "NIFTY50": "^NSEI",
+}
+
+
+def _resolve_price_ticker(raw_ticker: str) -> str:
+    normalized = raw_ticker.strip().upper()
+    return INDEX_TICKER_MAP.get(normalized, raw_ticker)
+
+
+def _extract_close(df: pd.DataFrame, label: str) -> pd.Series:
+    if df is None or df.empty or "close" not in df.columns:
+        raise ValueError(f"missing close series for {label}")
+    return df["close"].copy()
+
 
 @router.post("/backtest", response_model=BacktestResponse)
 async def run_backtest(req: BacktestRequest):
-    """Run vectorbt backtest. Uses Phase 9 engine."""
+    """Run a live-data backtest without synthetic market inputs."""
     logger.info("api.backtest", strategy=req.strategy, ticker=req.ticker)
     try:
         from backtesting.engine import BacktestEngine
-        from backtesting.strategies import mean_reversion_rsi_bb, ema_momentum, vix_gated_momentum
-        import pandas as pd
-        import yfinance as yf
-        
-        # Download real prices
-        prices_df = yf.download(req.ticker, period=f"{req.years}y", progress=False, auto_adjust=True)
-        if prices_df is None or prices_df.empty:
-            raise ValueError(f"Could not fetch data for {req.ticker}")
-        
-        # Flatten multi-level columns if any
-        if isinstance(prices_df.columns, pd.MultiIndex):
-            prices_df.columns = prices_df.columns.get_level_values(0)
-            
-        prices = prices_df["Close"]
-        
-        benchmark_df = yf.download("^NSEI", period=f"{req.years}y", progress=False, auto_adjust=True)
-        if benchmark_df is not None and not benchmark_df.empty:
-            if isinstance(benchmark_df.columns, pd.MultiIndex):
-                benchmark_df.columns = benchmark_df.columns.get_level_values(0)
-            benchmark_prices = benchmark_df["Close"]
-        else:
-            benchmark_prices = None
-        
-        # Generate signals based on requested strategy
+        from backtesting.strategies import (
+            ema_momentum,
+            fii_flow_momentum,
+            mean_reversion_rsi_bb,
+            vix_gated_momentum,
+        )
+
+        yf = YFinanceClient()
+        nselib = NSELibClient()
+        price_ticker = _resolve_price_ticker(req.ticker)
+
+        prices_df = await yf.get_ohlcv(price_ticker, period=f"{req.years}y")
+        benchmark_df = await yf.get_ohlcv("^NSEI", period=f"{req.years}y")
+        prices = _extract_close(prices_df, req.ticker)
+        benchmark_prices = benchmark_df["close"].copy() if benchmark_df is not None and not benchmark_df.empty else None
+
         if req.strategy == "mean_reversion":
             signals = mean_reversion_rsi_bb(prices)
         elif req.strategy == "ema_momentum":
             signals = ema_momentum(prices)
         elif req.strategy == "vix_gated":
-            vix_df = yf.download("^INDIAVIX", period=f"{req.years}y", progress=False, auto_adjust=True)
-            if vix_df is not None and not vix_df.empty:
-                if isinstance(vix_df.columns, pd.MultiIndex):
-                    vix_df.columns = vix_df.columns.get_level_values(0)
-                vix = vix_df["Close"]
-            else:
-                vix = pd.Series(15.0, index=prices.index)
+            vix_df = await yf.get_india_vix(period=f"{req.years}y")
+            if vix_df is None or vix_df.empty or "vix" not in vix_df.columns:
+                raise ValueError("India VIX history unavailable for vix_gated strategy")
+            vix = vix_df["vix"].copy()
             signals = vix_gated_momentum(prices, vix)
         elif req.strategy == "fii_flow":
-            # Just fallback to EMA momentum if true FII is unavailable in backtest engine perfectly aligned yet
-            signals = ema_momentum(prices)
+            fii_df = await nselib.get_fii_dii(days=max(req.years * 252, 90))
+            if fii_df.empty or "fii_net_value" not in fii_df.columns:
+                raise ValueError("FII flow history unavailable for fii_flow strategy")
+            signals = fii_flow_momentum(prices, fii_df["fii_net_value"])
         else:
             signals = mean_reversion_rsi_bb(prices)
-            
+
         engine = BacktestEngine(initial_capital=100000)
-        result = engine.run(prices=prices, signals=signals, strategy_name=req.strategy, ticker=req.ticker, benchmark_prices=benchmark_prices)
-        
+        result = engine.run(
+            prices=prices,
+            signals=signals,
+            strategy_name=req.strategy,
+            ticker=req.ticker,
+            benchmark_prices=benchmark_prices,
+        )
+
         dates_str = [str(d.date()) if hasattr(d, "date") else str(d)[:10] for d in result.equity_curve.index]
-        
-        # We need a benchmark curve for charting (indexed at starting capital)
+
         if benchmark_prices is not None:
-             b_aligned = benchmark_prices.reindex(result.equity_curve.index).ffill()
-             if not b_aligned.empty and b_aligned.iloc[0] > 0:
-                 b_curve = (b_aligned / b_aligned.iloc[0]) * engine.initial_capital
-                 b_curve_list = b_curve.ffill().tolist()
-             else:
-                 b_curve_list = []
+            b_aligned = benchmark_prices.reindex(result.equity_curve.index).ffill()
+            if not b_aligned.empty and b_aligned.iloc[0] > 0:
+                b_curve = (b_aligned / b_aligned.iloc[0]) * engine.initial_capital
+                b_curve_list = b_curve.ffill().tolist()
+            else:
+                b_curve_list = []
         else:
-             b_curve_list = []
-             
+            b_curve_list = []
+
         return BacktestResponse(
             strategy=req.strategy,
             ticker=req.ticker,
@@ -83,9 +102,8 @@ async def run_backtest(req: BacktestRequest):
             blueprint_gate_passed=result.sharpe_ratio >= 0.8,
             dates=dates_str,
             equity_curve=result.equity_curve.tolist(),
-            benchmark_curve=b_curve_list
+            benchmark_curve=b_curve_list,
         )
     except Exception as e:
-        from fastapi import HTTPException
         logger.error("api.backtest.error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")

@@ -31,12 +31,16 @@ render_help_popover("Macro India","""
 def get_macro():
     try:
         r = requests.get(f"{API_BASE}/macro/india-cues", timeout=15)
-        if r.status_code==200: return r.json()
+        if r.status_code==200:
+            return r.json()
     except Exception as e:
         st.error(f"Error fetching macro cues: {e}")
-    return {}
+    return None
 
 m = get_macro()
+if not m:
+    st.warning("Live macro cues unavailable right now.")
+    st.stop()
 vc = {"COMPLACENCY":"#8892b0","NORMAL":"#00d4aa","ELEVATED":"#f59e0b","EXTREME":"#f43f5e"}.get(m.get("vix_regime","NORMAL"),"#e8eaf6")
 
 c1,c2,c3,c4,c5 = st.columns(5)
@@ -59,18 +63,20 @@ if not df_vix.empty:
     idx_vix = df_vix.index
     vix_h = df_vix["Close"]
 else:
-    idx_vix = pd.date_range(end=datetime.date.today(), periods=120, freq="B")
-    vix_h = np.full(120, 15.0)
+    st.warning("Unable to load historical India VIX series.")
+    idx_vix = pd.Index([])
+    vix_h = pd.Series(dtype=float)
 
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=idx_vix,y=vix_h,name="India VIX",line=dict(color="#f59e0b",width=2),fill="tozeroy",fillcolor="rgba(245,158,11,0.07)"))
-fig.add_hline(y=18,line_color="#f59e0b",line_dash="dash",annotation_text="Elevated(18)")
-fig.add_hline(y=25,line_color="#f43f5e",line_dash="dash",annotation_text="Circuit Breaker(25)")
-fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
-                   height=280,margin=dict(l=0,r=0,t=30,b=0),
-                   title=dict(text="India VIX — 6M History",font=dict(color="#e8eaf6")),
-                   xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="VIX"),legend=dict(bgcolor="#1c2130"))
-st.plotly_chart(fig, width="stretch")
+if len(idx_vix) > 0:
+    fig.add_trace(go.Scatter(x=idx_vix,y=vix_h,name="India VIX",line=dict(color="#f59e0b",width=2),fill="tozeroy",fillcolor="rgba(245,158,11,0.07)"))
+    fig.add_hline(y=18,line_color="#f59e0b",line_dash="dash",annotation_text="Elevated(18)")
+    fig.add_hline(y=25,line_color="#f43f5e",line_dash="dash",annotation_text="Circuit Breaker(25)")
+    fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
+                       height=280,margin=dict(l=0,r=0,t=30,b=0),
+                       title=dict(text="India VIX — 6M History",font=dict(color="#e8eaf6")),
+                       xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="VIX"),legend=dict(bgcolor="#1c2130"))
+    st.plotly_chart(fig, width="stretch")
 
 col_l,col_r = st.columns(2)
 with col_l:
@@ -79,21 +85,23 @@ with col_l:
     if not df_crude.empty:
         idx_crude, crude = df_crude.index, df_crude["Close"]
     else:
-        idx_crude = pd.date_range(end=datetime.date.today(), periods=60, freq="B")
-        crude = np.full(60, 80.0)
-    
-    f2=go.Figure(go.Scatter(x=idx_crude,y=crude,line=dict(color="#f43f5e",width=2),fill="tozeroy",fillcolor="rgba(244,63,94,0.07)"))
-    f2.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",height=230,margin=dict(l=0,r=0,t=10,b=0),xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="$/bbl"))
-    st.plotly_chart(f2, width="stretch")
+        st.info("Historical Brent series unavailable.")
+        idx_crude = pd.Index([])
+        crude = pd.Series(dtype=float)
+    if len(idx_crude) > 0:
+        f2=go.Figure(go.Scatter(x=idx_crude,y=crude,line=dict(color="#f43f5e",width=2),fill="tozeroy",fillcolor="rgba(244,63,94,0.07)"))
+        f2.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",height=230,margin=dict(l=0,r=0,t=10,b=0),xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="$/bbl"))
+        st.plotly_chart(f2, width="stretch")
 with col_r:
     st.markdown("#### USD/INR — 3M")
     df_inr = safe_yf_download("USDINR=X", period="3mo")
     if not df_inr.empty:
         idx_inr, inr = df_inr.index, df_inr["Close"]
     else:
-        idx_inr = pd.date_range(end=datetime.date.today(), periods=60, freq="B")
-        inr = np.full(60, 83.0)
-        
-    f3=go.Figure(go.Scatter(x=idx_inr,y=inr,line=dict(color="#3b82f6",width=2),fill="tozeroy",fillcolor="rgba(59,130,246,0.07)"))
-    f3.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",height=230,margin=dict(l=0,r=0,t=10,b=0),xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="INR/USD"))
-    st.plotly_chart(f3, width="stretch")
+        st.info("Historical USD/INR series unavailable.")
+        idx_inr = pd.Index([])
+        inr = pd.Series(dtype=float)
+    if len(idx_inr) > 0:
+        f3=go.Figure(go.Scatter(x=idx_inr,y=inr,line=dict(color="#3b82f6",width=2),fill="tozeroy",fillcolor="rgba(59,130,246,0.07)"))
+        f3.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",height=230,margin=dict(l=0,r=0,t=10,b=0),xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="INR/USD"))
+        st.plotly_chart(f3, width="stretch")

@@ -37,9 +37,12 @@ def get_live_sentiment(tkr):
             return r.json()
     except Exception:
         pass
-    return {"composite_score": 0.0, "composite_label": "NEUTRAL", "fear_greed_index": 50.0, "fear_greed_label": "NEUTRAL"}
+    return None
 
 live_data = get_live_sentiment(ticker)
+if not live_data:
+    st.warning("Live sentiment data unavailable for this ticker.")
+    st.stop()
 fg_score  = live_data.get("fear_greed_index", 50.0)
 base_name = ticker.replace(".NS","").replace(".BO","")
 col_g, col_m = st.columns([1,2])
@@ -72,7 +75,7 @@ lbl       = live_data.get("composite_label", "NEUTRAL")
 with col_m:
     st.markdown(f"#### FinBERT Scores — {base_name}")
     df_fb = pd.DataFrame({"Source":["ProsusAI/finbert","FinBERT-India-v1","finbert-tone","GDELT V2Tone"],
-                           "Sentiment":["Active","Active","Active","Active"],
+                           "Sentiment":["Active","Supplementary","Conditional","Macro"],
                            "Weight":["35%","15%","20%","20%"],"Signal":[f"{lbl}", f"{lbl}", "Neutral", "BULLISH" if composite>0 else "BEARISH"]})
     st.dataframe(df_fb, width="stretch", hide_index=True)
     

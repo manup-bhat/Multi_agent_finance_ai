@@ -40,11 +40,12 @@ def get_real_history(n):
             return df.tail(n)[["FII", "DII"]]
     except Exception as e:
         st.warning(f"Failed to fetch live FII/DII data: {e}")
-        
-    idx = pd.date_range(end=datetime.date.today(), periods=n, freq="B")
-    return pd.DataFrame({"FII": np.zeros(n), "DII": np.zeros(n)}, index=idx)
+    return pd.DataFrame(columns=["FII", "DII"])
 
 hist = get_real_history(days_val)
+if hist.empty:
+    st.warning("No live FII/DII history available right now.")
+    st.stop()
 
 if len(hist) > 0 and hist["FII"].abs().sum() > 0:
     last_fii = hist["FII"].iloc[-1]

@@ -1,26 +1,9 @@
 """
-FastAPI — India Multi-Agent Financial Engine — Main Entry Point
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Phase 12 API layer:
-  POST /analyze       → full 9-agent analysis
-  POST /predict       → ML ensemble prediction
-  POST /fno/analyze   → F&O options analysis
-  GET  /macro/india-cues → macro indicators
-  GET  /fii-dii/latest   → FII/DII flows
-  POST /backtest         → run backtest strategy
-  GET  /health           → service health check
-
-Architecture:
-  - FastAPI with async lifespan (startup/shutdown)
-  - SEBI compliance middleware (rate limiter check on every request)
-  - CORS configured for Streamlit frontend (localhost:8501)
-  - Structured logging via structlog
-  - All heavy dependencies loaded lazily (no import-time failures)
+FastAPI — India Multi-Agent Financial Engine — Main Entry Point.
 """
 from __future__ import annotations
 
 import time
-from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
@@ -32,14 +15,6 @@ from api.routes import health, analyze, predict, fno, macro, fii_dii, backtest, 
 logger = structlog.get_logger(__name__)
 
 
-# ── Lifespan (startup / shutdown) ─────────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("api.startup", version="12.0.0")
-    yield
-    logger.info("api.shutdown")
-
-
 # ── App ───────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="India Multi-Agent Financial Engine",
@@ -48,7 +23,6 @@ app = FastAPI(
         "Uses Chronos-2, XGBoost, LightGBM, CatBoost ensemble + FinBERT sentiment."
     ),
     version="12.0.0",
-    lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )

@@ -1,4 +1,4 @@
-"""Page 8: Sector Rotation — global ticker via render_global_sidebar()."""
+"""Page 8: Sector Rotation — live sector relative strength versus Nifty."""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -14,7 +14,7 @@ def _extras():
     period_sel = st.selectbox("Lookback Period", ["1M","3M","6M","1Y"], index=1)
 
 ticker = render_global_sidebar(page_extra_fn=_extras)
-render_page_header("🔄","Sector Rotation","NSE Sectoral RS vs Nifty 50 · Rotation Clock")
+render_page_header("🔄","Sector Rotation","Live NSE sector relative strength vs Nifty 50")
 render_help_popover("Sector Rotation","""
 **RS > 0%** → Outperforming Nifty. Focus capital on **Leading** sectors.
 
@@ -28,52 +28,79 @@ render_help_popover("Sector Rotation","""
 """)
 
 from ui_helpers import safe_yf_download
-from datetime import timedelta
-
 sectors_map = {
     "Bank": "^NSEBANK", "IT": "^CNXIT", "Pharma": "^CNXPHARMA", 
     "FMCG": "^CNXFMCG", "Auto": "^CNXAUTO", "Metal": "^CNXMETAL", 
     "Realty": "^CNXREALTY", "Energy": "^CNXENERGY", "Infra": "^CNXINFRA", "Media": "^CNXMEDIA"
 }
-sectors = list(sectors_map.keys())
-
 @st.cache_data(ttl=3600)
 def get_rs_data():
     bench = safe_yf_download("^NSEI", period="1y")
     if bench is None or bench.empty:
-        return np.random.randn(10)*4+1, np.random.randn(10)*8+2, np.random.randn(10)*12+3
-        
+        return pd.DataFrame(), ["NIFTY benchmark unavailable"]
+
     def _calc_ret(df, days):
-        if len(df) < days: return 0.0
+        if len(df) < days:
+            return np.nan
         return (df["Close"].iloc[-1] / df["Close"].iloc[-days] - 1) * 100
-        
+
     bench_1m = _calc_ret(bench, 21)
     bench_3m = _calc_ret(bench, 63)
     bench_6m = _calc_ret(bench, 126)
-    
-    rs_1m, rs_3m, rs_6m = [], [], []
+
+    rows = []
+    missing = []
     for sec, sym in sectors_map.items():
         df = safe_yf_download(sym, period="1y")
         if df is not None and not df.empty:
             s_1m = _calc_ret(df, 21)
             s_3m = _calc_ret(df, 63)
             s_6m = _calc_ret(df, 126)
-            rs_1m.append(s_1m - bench_1m)
-            rs_3m.append(s_3m - bench_3m)
-            rs_6m.append(s_6m - bench_6m)
+            rows.append(
+                {
+                    "Sector": sec,
+                    "1M RS": s_1m - bench_1m,
+                    "3M RS": s_3m - bench_3m,
+                    "6M RS": s_6m - bench_6m,
+                }
+            )
         else:
-            rs_1m.append(0.0); rs_3m.append(0.0); rs_6m.append(0.0)
-    return rs_1m, rs_3m, rs_6m
+            missing.append(sec)
+
+    df_rs = pd.DataFrame(rows)
+    return df_rs, missing
 
 with st.spinner("Calculating live Sector Relative Strength vs Nifty 50..."):
-    rs_1m, rs_3m, rs_6m = get_rs_data()
+    df_rs, missing_sectors = get_rs_data()
 
-df_rs = pd.DataFrame({"Sector":sectors,"1M RS":rs_1m,"3M RS":rs_3m,"6M RS":rs_6m})
-df_rs["Trend"] = df_rs["1M RS"].apply(lambda x: "🟢 Outperforming" if x>0 else "🔴 Underperforming")
+if df_rs.empty:
+    st.warning("Live sector data unavailable right now.")
+    st.stop()
 
-fig=go.Figure(go.Heatmap(z=[rs_1m,rs_3m,rs_6m],x=sectors,y=["1M RS","3M RS","6M RS"],
+if missing_sectors:
+    st.info(f"Skipped sectors with unavailable live data: {', '.join(missing_sectors)}")
+
+period_column = {"1M": "1M RS", "3M": "3M RS", "6M": "6M RS", "1Y": "6M RS"}[period_sel]
+df_rs["Momentum"] = df_rs["1M RS"] - df_rs["3M RS"]
+df_rs["Trend"] = df_rs[period_column].apply(lambda x: "🟢 Outperforming" if x > 0 else "🔴 Underperforming")
+
+def classify_stage(row):
+    rs_value = float(row[period_column])
+    momentum = float(row["Momentum"])
+    if rs_value >= 0 and momentum >= 0:
+        return "Leading"
+    if rs_value >= 0 and momentum < 0:
+        return "Weakening"
+    if rs_value < 0 and momentum >= 0:
+        return "Improving"
+    return "Lagging"
+
+df_rs["Stage"] = df_rs.apply(classify_stage, axis=1)
+df_rs = df_rs.sort_values(period_column, ascending=False).reset_index(drop=True)
+
+fig=go.Figure(go.Heatmap(z=[df_rs["1M RS"],df_rs["3M RS"],df_rs["6M RS"]],x=df_rs["Sector"],y=["1M RS","3M RS","6M RS"],
                           colorscale=[[0,"#f43f5e"],[0.5,"#161922"],[1,"#00d4aa"]],
-                          text=[[f"{v:.1f}%" for v in r] for r in [rs_1m,rs_3m,rs_6m]],
+                          text=[[f"{v:.1f}%" for v in r] for r in [df_rs["1M RS"],df_rs["3M RS"],df_rs["6M RS"]]],
                           texttemplate="%{text}",textfont=dict(size=10),zmid=0))
 fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
                    height=260,margin=dict(l=0,r=0,t=30,b=0),
@@ -83,19 +110,21 @@ st.plotly_chart(fig, width="stretch")
 
 col1,col2=st.columns(2)
 with col1:
-    st.markdown("#### 1-Month RS")
-    fig2=go.Figure(go.Bar(x=rs_1m,y=sectors,orientation="h",
-                           marker_color=["#00d4aa" if v>0 else "#f43f5e" for v in rs_1m],
-                           text=[f"{v:.1f}%" for v in rs_1m],textposition="outside"))
+    st.markdown(f"#### {period_column}")
+    fig2=go.Figure(go.Bar(x=df_rs[period_column],y=df_rs["Sector"],orientation="h",
+                           marker_color=["#00d4aa" if v>0 else "#f43f5e" for v in df_rs[period_column]],
+                           text=[f"{v:.1f}%" for v in df_rs[period_column]],textposition="outside"))
     fig2.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
                         height=340,margin=dict(l=0,r=60,t=10,b=0),
                         xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554"))
     st.plotly_chart(fig2, width="stretch")
 with col2:
     st.markdown("#### Rotation Table")
-    st.dataframe(df_rs[["Sector","1M RS","3M RS","Trend"]].round(1), width="stretch", hide_index=True)
+    st.dataframe(df_rs[["Sector","1M RS","3M RS","6M RS","Trend","Stage"]].round(1), width="stretch", hide_index=True)
     st.markdown("#### Stage")
-    for sec,stage in {"Bank":"Leading","IT":"Weakening","Auto":"Improving","Metal":"Lagging"}.items():
+    for _, row in df_rs.iterrows():
+        sec = row["Sector"]
+        stage = row["Stage"]
         clr={"Leading":"#00d4aa","Improving":"#3b82f6","Weakening":"#f59e0b","Lagging":"#f43f5e"}[stage]
         st.markdown(f"""<div style='display:flex;justify-content:space-between;padding:.4rem .8rem;background:#161922;border-radius:6px;margin:.2rem 0;border:1px solid #2d3554;'>
         <span>{sec}</span><span style='color:{clr};font-weight:600;'>{stage}</span></div>""",unsafe_allow_html=True)

@@ -40,12 +40,11 @@ render_help_popover("Backtest Results","""
 def get_backtest(strat, tkr, yrs):
     try:
         r=requests.post(f"{API_BASE}/backtest",json={"strategy":strat,"ticker":tkr,"years":yrs},timeout=60)
-        if r.status_code==200: return r.json()
+        if r.status_code==200:
+            return r.json()
     except Exception as e: 
         st.error(f"Failed to fetch real backtest data: {str(e)}")
-        pass
-    return {"strategy":strat,"ticker":tkr,"sharpe_ratio":0.0,"cagr_pct":0.0,
-            "max_drawdown_pct":0.0,"win_rate_pct":0.0,"n_trades":0,"blueprint_gate_passed":False, "dates": [], "equity_curve": [], "benchmark_curve": []}
+    return None
 
 prev_t=st.session_state.get("bt_ticker",""); prev_s=st.session_state.get("bt_strategy","")
 if run_btn_val or prev_t!=ticker or prev_s!=strat_val or "bt_data" not in st.session_state:
@@ -54,6 +53,9 @@ if run_btn_val or prev_t!=ticker or prev_s!=strat_val or "bt_data" not in st.ses
         st.session_state.update({"bt_data":data,"bt_ticker":ticker,"bt_strategy":strat_val})
 
 data=st.session_state.get("bt_data",get_backtest(strat_val,ticker,years_val))
+if not data:
+    st.warning("Live backtest data unavailable.")
+    st.stop()
 gate=data.get("blueprint_gate_passed",False); g_clr="#00d4aa" if gate else "#f43f5e"
 st.markdown(f"""<div style='background:#161922;border:2px solid {g_clr};border-radius:10px;padding:.85rem 1.5rem;margin-bottom:1rem;'>
 <span style='color:{g_clr};font-weight:700;'>{"✅ Blueprint Gate PASSED — Sharpe>0.8" if gate else "❌ Blueprint Gate FAILED — Sharpe too low"}</span></div>""",unsafe_allow_html=True)

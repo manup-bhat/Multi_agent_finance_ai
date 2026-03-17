@@ -15,19 +15,23 @@ def fetch_live_vix():
     try:
         r = requests.get(f"{API_BASE}/macro/india-cues", timeout=5)
         if r.status_code == 200:
-            vix = r.json().get("vix")
-            if vix is not None: return float(vix)
-    except: pass
-    return 15.2
+            payload = r.json()
+            vix = payload.get("vix")
+            fii_trend = payload.get("fii_trend", "UNKNOWN")
+            return (float(vix) if vix is not None else None, fii_trend)
+    except Exception:
+        pass
+    return (None, "UNKNOWN")
 
-live_vix = fetch_live_vix()
-cap_val=1_000_000; win_val=58; wl_val=1.8; vix_val=live_vix
+live_vix, live_fii_trend = fetch_live_vix()
+slider_default_vix = float(live_vix) if live_vix is not None else 15.0
+cap_val=1_000_000; win_val=58; wl_val=1.8; vix_val=slider_default_vix
 def _extras():
     global cap_val, win_val, wl_val, vix_val
     cap_val = st.number_input("Capital (₹)", value=1_000_000, step=100_000)
     win_val = st.slider("Win Rate (%)", 30, 80, 58)
     wl_val  = st.slider("Win/Loss Ratio", 0.5, 5.0, 1.8)
-    vix_val = st.slider("India VIX", 8.0, 40.0, float(live_vix))
+    vix_val = st.slider("India VIX", 8.0, 40.0, slider_default_vix)
 
 ticker = render_global_sidebar(page_extra_fn=_extras)
 render_page_header("🛡️","Risk Monitor",f"{ticker} · VIX Gate · Kelly Criterion · Drawdown")
@@ -53,10 +57,13 @@ reg_name,reg_clr,reg_msg = (
     ("COMPLACENCY","#8892b0","⚪ Complacency — Consider selling premium")
 )
 
+if live_vix is None:
+    st.warning("Live India VIX unavailable. Slider is showing a manual estimate until the macro API responds.")
+
 c1,c2,c3,c4=st.columns(4)
 c1.metric("India VIX",    f"{vix:.1f}", reg_name)
 c2.metric("Regime",       reg_name)
-c3.metric("FII Streak",   "3 Buy days")
+c3.metric("FII Trend",    live_fii_trend)
 c4.metric("Circuit Breaker","🔴 ACTIVE" if vix>=25 else "🟢 CLEAR")
 
 st.markdown(f"""<div style='background:#161922;border:2px solid {reg_clr};border-radius:12px;padding:1rem 1.5rem;margin:1rem 0;'>
@@ -94,16 +101,15 @@ with col_d:
         dd = (equity_series - equity_series.cummax()) / equity_series.cummax() * 100
         min_dd = float(dd.min()) if not dd.empty else 0.0
     else:
-        # Fallback empty chart if ticker data fails
-        idx = pd.date_range(end=datetime.date.today(), periods=90, freq="B")
-        dd = pd.Series(0, index=idx)
-        min_dd = 0.0
-        st.warning("Could not fetch real price data. Showing flat curve.")
-        
-    fig=go.Figure(go.Scatter(x=idx,y=dd,fill="tozeroy",fillcolor="rgba(244,63,94,0.07)",
-                              line=dict(color="#f43f5e",width=2)))
-    fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
-                       height=280,margin=dict(l=0,r=0,t=10,b=0),
-                       xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="DD %"))
-    st.plotly_chart(fig, width="stretch")
-    st.metric("Max Drawdown (90d)", f"{min_dd:.1f}%")
+        st.warning("Could not fetch real price data for the drawdown monitor.")
+        dd = None
+        min_dd = None
+
+    if dd is not None:
+        fig=go.Figure(go.Scatter(x=idx,y=dd,fill="tozeroy",fillcolor="rgba(244,63,94,0.07)",
+                                  line=dict(color="#f43f5e",width=2)))
+        fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
+                           height=280,margin=dict(l=0,r=0,t=10,b=0),
+                           xaxis=dict(gridcolor="#2d3554"),yaxis=dict(gridcolor="#2d3554",title="DD %"))
+        st.plotly_chart(fig, width="stretch")
+        st.metric("Max Drawdown (90d)", f"{min_dd:.1f}%")

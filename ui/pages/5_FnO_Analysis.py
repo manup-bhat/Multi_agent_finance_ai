@@ -31,15 +31,11 @@ render_help_popover("F&O Analysis","""
 def get_fno(sym):
     try:
         r = requests.post(f"{API_BASE}/fno/analyze", json={"symbol":sym}, timeout=10)
-        if r.status_code==200: return r.json()
-    except: pass
-    return {"symbol":sym,"pcr":1.15,"pcr_signal":"SLIGHTLY_BULLISH","max_pain":21500,
-            "iv_rank_pct":32.0,"atm_iv":14.5,"fii_futures_net":"LONG",
-            "participant_oi":{"FII":{"long":182000,"short":97000,"net":85000},
-                              "DII":{"long":42000,"short":38000,"net":4000},
-                              "Client":{"long":210000,"short":310000,"net":-100000}},
-            "strategy_recommendation":"Bull Call Spread 21500-22000 (low IV — debit spread favoured)",
-            "greeks_atm":{"delta":0.50,"gamma":0.002,"theta":-12.5,"vega":35.0}}
+        if r.status_code==200:
+            return r.json()
+    except Exception:
+        pass
+    return None
 
 prev = st.session_state.get("fno_symbol","")
 if prev != symbol or "fno_data" not in st.session_state:
@@ -47,40 +43,49 @@ if prev != symbol or "fno_data" not in st.session_state:
         st.session_state.update({"fno_data":get_fno(symbol),"fno_symbol":symbol})
 data = st.session_state.get("fno_data", get_fno(symbol))
 
+if not data:
+    st.warning("Live F&O data unavailable right now.")
+    st.stop()
+
 m1,m2,m3,m4,m5 = st.columns(5)
-m1.metric("PCR",       f"{data['pcr']:.2f}", data['pcr_signal'])
-m2.metric("Max Pain",  f"₹{data['max_pain']:,}")
-m3.metric("IV Rank",   f"{data['iv_rank_pct']:.0f}%", "Low ✅" if data['iv_rank_pct']<30 else ("High ⚠️" if data['iv_rank_pct']>70 else "Normal"))
-m4.metric("ATM IV",    f"{data['atm_iv']:.1f}%")
-m5.metric("FII Fut.",  data['fii_futures_net'])
+m1.metric("PCR",       f"{data['pcr']:.2f}" if data.get("pcr") is not None else "—", data.get('pcr_signal', '—'))
+m2.metric("Max Pain",  f"₹{data['max_pain']:,}" if data.get("max_pain") is not None else "—")
+m3.metric("IV Rank",   f"{data['iv_rank_pct']:.0f}%" if data.get("iv_rank_pct") is not None else "—")
+m4.metric("ATM IV",    f"{data['atm_iv']:.1f}%" if data.get("atm_iv") is not None else "—")
+m5.metric("Source",    data.get("source", "—"))
 
 st.markdown("---")
 col_oi, col_g = st.columns([1.4,1])
 with col_oi:
     st.markdown("#### Participant OI")
-    poi = data.get("participant_oi",{}); parts=list(poi.keys()); nets=[poi[p]["net"] for p in parts]
-    fig=go.Figure(go.Bar(x=parts,y=nets,marker_color=["#00d4aa" if n>0 else "#f43f5e" for n in nets],
-                          text=[f"{n:+,}" for n in nets],textposition="outside"))
-    fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
-                       height=280,margin=dict(l=0,r=0,t=10,b=0),
-                       yaxis=dict(gridcolor="#2d3554",title="Net OI"),xaxis=dict(gridcolor="#2d3554"))
-    st.plotly_chart(fig, width="stretch")
+    poi = data.get("participant_oi",{})
+    parts = list(poi.keys())
+    nets = [poi[p].get("net") for p in parts]
+    valid_nets = [n for n in nets if n is not None]
+    if valid_nets:
+        fig=go.Figure(go.Bar(x=parts,y=[n or 0 for n in nets],marker_color=["#00d4aa" if (n or 0)>0 else "#f43f5e" for n in nets],
+                              text=[f"{(n or 0):+,}" for n in nets],textposition="outside"))
+        fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
+                           height=280,margin=dict(l=0,r=0,t=10,b=0),
+                           yaxis=dict(gridcolor="#2d3554",title="Net OI"),xaxis=dict(gridcolor="#2d3554"))
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("Participant OI breakdown unavailable for this session.")
 with col_g:
-    st.markdown("#### ATM Greeks")
-    for nm,val,unit in [("Δ Delta",data["greeks_atm"]["delta"],""),("Γ Gamma",data["greeks_atm"]["gamma"],""),
-                         ("Θ Theta",data["greeks_atm"]["theta"],"₹/day"),("ν Vega",data["greeks_atm"]["vega"],"₹/1%IV")]:
-        c={"Delta":"#00d4aa","Theta":"#f59e0b"}.get(([k for k in ["Delta","Theta"] if k in nm]+["x"])[0],"#3b82f6")
-        st.markdown(f"""<div style='background:#161922;border:1px solid #2d3554;border-radius:8px;padding:.6rem 1rem;margin:.3rem 0;display:flex;justify-content:space-between;'>
-        <span style='color:#8892b0;'>{nm}</span><span style='color:#3b82f6;font-weight:700;'>{val} {unit}</span></div>""",unsafe_allow_html=True)
+    st.markdown("#### Live Summary")
+    greeks = data.get("greeks_atm") or {}
+    if greeks:
+        for nm,val,unit in [("Δ Delta",greeks.get("delta"),""),("Γ Gamma",greeks.get("gamma"),""),
+                             ("Θ Theta",greeks.get("theta"),"₹/day"),("ν Vega",greeks.get("vega"),"₹/1%IV")]:
+            st.markdown(f"""<div style='background:#161922;border:1px solid #2d3554;border-radius:8px;padding:.6rem 1rem;margin:.3rem 0;display:flex;justify-content:space-between;'>
+            <span style='color:#8892b0;'>{nm}</span><span style='color:#3b82f6;font-weight:700;'>{val if val is not None else "—"} {unit}</span></div>""",unsafe_allow_html=True)
+    else:
+        st.info("ATM Greeks unavailable from the live option chain snapshot.")
     st.markdown(f"""<div style='background:#161922;border:1px solid rgba(0,212,170,.4);border-radius:10px;padding:.85rem 1rem;margin-top:.5rem;'>
     <span style='color:#00d4aa;font-size:.85rem;'>💡 {data.get("strategy_recommendation","—")}</span></div>""",unsafe_allow_html=True)
 
-st.markdown("#### IV Smile Curve")
-strikes=np.arange(20500,22500,250); atm=21500
-iv=14.5+3*((strikes-atm)/500)**2
-fig_iv=go.Figure(go.Scatter(x=strikes,y=iv,mode="lines+markers",line=dict(color="#3b82f6",width=2.5)))
-fig_iv.add_vline(x=atm,line_color="#f59e0b",line_dash="dash",annotation_text="ATM")
-fig_iv.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
-                      height=260,margin=dict(l=0,r=0,t=10,b=0),
-                      xaxis=dict(gridcolor="#2d3554",title="Strike"),yaxis=dict(gridcolor="#2d3554",title="IV %"))
-st.plotly_chart(fig_iv, width="stretch")
+st.markdown("#### Live Interpretation")
+st.info(
+    "This page now shows only live option-chain-derived metrics. "
+    "If the NSE option chain is unavailable outside market hours, the page will surface that instead of synthetic curves."
+)

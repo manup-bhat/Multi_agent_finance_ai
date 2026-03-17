@@ -1,15 +1,26 @@
-"""POST /sentiment — Complex multi-model news and social sentiment analysis."""
-from fastapi import APIRouter
+"""POST /sentiment — live multi-source sentiment analysis."""
+from __future__ import annotations
+
+import asyncio
+from typing import List, Optional
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import structlog
-from typing import List, Optional
+
+from data.adapters.india_news_scraper import IndiaNewsScraperClient, StockTwitsClient
+from data.adapters.yfinance_client import YFinanceClient
+from sentiment.composite_sentiment import get_composite_sentiment
+from sentiment.finbert_analyzer import get_finbert_analyzer
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
+
 class SentimentRequest(BaseModel):
     ticker: str
     sources: Optional[List[str]] = None
+
 
 class ArticleItem(BaseModel):
     source: str
@@ -17,6 +28,7 @@ class ArticleItem(BaseModel):
     sentiment: float
     label: str
     date: str
+
 
 class SentimentResponse(BaseModel):
     ticker: str
@@ -26,84 +38,102 @@ class SentimentResponse(BaseModel):
     fear_greed_label: str
     articles: List[ArticleItem]
 
-@router.post("", response_model=SentimentResponse)
-async def analyze_sentiment(req: SentimentRequest):
-    """Run real FinBERT/composite sentiment on fetched macro/news headlines."""
-    logger.info("api.sentiment.request", ticker=req.ticker)
-    try:
-        from sentiment.composite_sentiment import get_composite_sentiment
-        from data.adapters.india_news_scraper import IndiaNewsScraperClient
-        
-        # 1. Fetch real news
-        scraper = IndiaNewsScraperClient()
-        articles = await scraper.get_ticker_news(req.ticker)
-        
-        # 2. Run real composite sentiment
-        engine = get_composite_sentiment()
-        
-        # Simple string-list extraction for the models
-        news_texts = [a.get("title", "") for a in articles]
-        
-        if not news_texts:
-             return SentimentResponse(
-                 ticker=req.ticker,
-                 composite_score=0.0,
-                 composite_label="NEUTRAL",
-                 fear_greed_index=50.0,
-                 fear_greed_label="NEUTRAL",
-                 articles=[]
-             )
-        
-        # Analyze using engine (runs FinBERT, GoEmotions, etc.)
-        result = await engine.analyze(
-            ticker=req.ticker,
-            news_texts=news_texts,
-            social_texts=[], # Optional PRAW hook logic could go here later
-            earnings_texts=[]
-        )
-        
-        # Map back to articles structure
-        scored_articles = []
-        for i, article in enumerate(articles):
-             score = result.components.finbert.score # Fallback approximation for individual scores if batch isn't neatly mapped
-             # To be safe, try to get specific score if available from module
-             try:
-                 score = result.components.finbert.batch_scores[i] if hasattr(result.components.finbert, "batch_scores") else result.components.finbert.score
-             except Exception:
-                 pass
-             
-             label = "POSITIVE" if score > 0.2 else ("NEGATIVE" if score < -0.2 else "NEUTRAL")
-             scored_articles.append(ArticleItem(
-                 source=article.get("source", "News"),
-                 headline=article.get("title", ""),
-                 sentiment=round(score, 2),
-                 label=label,
-                 date=article.get("published", "")
-             ))
-             
-        # Filter if requested
-        if req.sources:
-             scored_articles = [a for a in scored_articles if a.source in req.sources]
-             
-        comp_score = result.composite_score
-        comp_label = "BULLISH" if comp_score > 0.2 else ("BEARISH" if comp_score < -0.2 else "NEUTRAL")
-        
+
+def _normalize_finbert_label(label: str) -> str:
+    mapping = {
+        "positive": "POSITIVE",
+        "negative": "NEGATIVE",
+        "neutral": "NEUTRAL",
+    }
+    return mapping.get(str(label).lower(), "NEUTRAL")
+
+
+async def build_live_sentiment_response(
+    ticker: str,
+    sources: Optional[List[str]] = None,
+) -> SentimentResponse:
+    scraper = IndiaNewsScraperClient()
+    stocktwits = StockTwitsClient()
+    sentiment_engine = get_composite_sentiment()
+    finbert = get_finbert_analyzer()
+    yf = YFinanceClient()
+
+    articles = await scraper.get_ticker_news(ticker)
+    news_texts = [a.get("title", "").strip() for a in articles if a.get("title")]
+
+    if not news_texts:
         return SentimentResponse(
-             ticker=req.ticker,
-             composite_score=round(comp_score, 2),
-             composite_label=comp_label,
-             fear_greed_index=round(result.fear_greed_index, 1),
-             fear_greed_label=result.fear_greed_label,
-             articles=scored_articles
-        )
-        
-    except Exception as e:
-        logger.error("api.sentiment.error", error=str(e))
-        return SentimentResponse(
-            ticker=req.ticker,
+            ticker=ticker,
             composite_score=0.0,
             composite_label="NEUTRAL",
             fear_greed_index=50.0,
             fear_greed_label="NEUTRAL",
-            articles=[ArticleItem(source="System", headline=f"Error analyzing sentiment: {str(e)[:50]}", sentiment=0.0, label="NEUTRAL", date="")]
+            articles=[],
         )
+
+    finbert_batch, st_messages, vix_df = await asyncio.gather(
+        finbert.analyze_texts(news_texts),
+        stocktwits.get_symbol_messages(ticker),
+        yf.get_india_vix(period="1mo"),
+        return_exceptions=True,
+    )
+
+    if isinstance(finbert_batch, Exception):
+        raise finbert_batch
+
+    if isinstance(st_messages, Exception):
+        st_messages = []
+
+    current_vix = None
+    if not isinstance(vix_df, Exception) and vix_df is not None and not vix_df.empty:
+        current_vix = float(vix_df["vix"].iloc[-1])
+
+    bullish = sum(1 for m in st_messages if m.get("sentiment") == "Bullish")
+    bearish = sum(1 for m in st_messages if m.get("sentiment") == "Bearish")
+    neutral = len(st_messages) - bullish - bearish
+    social_texts = [m.get("body", "") for m in st_messages if m.get("body")]
+
+    composite = await sentiment_engine.analyze(
+        ticker=ticker,
+        news_texts=news_texts,
+        social_texts=social_texts,
+        stocktwits_bullish=bullish,
+        stocktwits_bearish=bearish,
+        stocktwits_neutral=neutral,
+        current_vix=current_vix,
+    )
+
+    scored_articles: List[ArticleItem] = []
+    for article, score_result in zip(articles, finbert_batch.results):
+        scored_articles.append(
+            ArticleItem(
+                source=article.get("source", "news"),
+                headline=article.get("title", ""),
+                sentiment=round(score_result.score, 4),
+                label=_normalize_finbert_label(score_result.label),
+                date=article.get("published", ""),
+            )
+        )
+
+    if sources:
+        allowed = {src.lower() for src in sources}
+        scored_articles = [a for a in scored_articles if a.source.lower() in allowed]
+
+    return SentimentResponse(
+        ticker=ticker,
+        composite_score=round(composite.score, 4),
+        composite_label=composite.label,
+        fear_greed_index=round(composite.fear_greed_index, 2),
+        fear_greed_label=composite.fear_greed_label,
+        articles=scored_articles,
+    )
+
+
+@router.post("", response_model=SentimentResponse)
+async def analyze_sentiment(req: SentimentRequest) -> SentimentResponse:
+    logger.info("api.sentiment.request", ticker=req.ticker)
+    try:
+        return await build_live_sentiment_response(req.ticker, req.sources)
+    except Exception as exc:
+        logger.error("api.sentiment.error", error=str(exc))
+        raise HTTPException(status_code=503, detail=f"Live sentiment unavailable: {exc}") from exc

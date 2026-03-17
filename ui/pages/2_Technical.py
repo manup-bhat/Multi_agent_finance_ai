@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd, numpy as np, datetime
+from data.processors.smc_analyzer import detect_smc_zones
 from ui_helpers import render_global_sidebar, safe_yf_download, flat_css, render_page_header, render_help_popover
 
 st.set_page_config(page_title="Technical · India Engine", page_icon="📐", layout="wide")
@@ -88,16 +89,21 @@ st.plotly_chart(fig, width="stretch")
 
 if show_smc_val:
     st.markdown("#### 🟦 SMC Zones")
+    smc_input = df.rename(columns=str.lower)
+    smc = detect_smc_zones(smc_input[["open", "high", "low", "close", "volume"]])
+    bull_ob = smc.get("nearest_ob_below")
+    bear_ob = smc.get("nearest_ob_above")
+    fvg_count = smc.get("summary", {}).get("fvg_count", 0)
     c1,c2,c3 = st.columns(3)
     c1.markdown(f"""<div style='background:#161922;border:1px solid #3b82f6;border-radius:10px;padding:1rem;'>
     <b style='color:#3b82f6;'>📦 Bullish OB</b><br>
-    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>₹{last_c*0.97:.2f}–₹{last_c*0.98:.2f}</span><br>
-    <span style='color:#8892b0;font-size:.8rem;'>Strong demand zone (3 tests)</span></div>""", unsafe_allow_html=True)
+    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>{f"₹{bull_ob['bottom']:.2f}–₹{bull_ob['top']:.2f}" if bull_ob else "Unavailable"}</span><br>
+    <span style='color:#8892b0;font-size:.8rem;'>Nearest live bullish order block</span></div>""", unsafe_allow_html=True)
     c2.markdown(f"""<div style='background:#161922;border:1px solid #f43f5e;border-radius:10px;padding:1rem;'>
     <b style='color:#f43f5e;'>📦 Bearish OB</b><br>
-    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>₹{last_c*1.04:.2f}–₹{last_c*1.06:.2f}</span><br>
-    <span style='color:#8892b0;font-size:.8rem;'>Supply zone (unmitigated)</span></div>""", unsafe_allow_html=True)
+    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>{f"₹{bear_ob['bottom']:.2f}–₹{bear_ob['top']:.2f}" if bear_ob else "Unavailable"}</span><br>
+    <span style='color:#8892b0;font-size:.8rem;'>Nearest live bearish order block</span></div>""", unsafe_allow_html=True)
     c3.markdown(f"""<div style='background:#161922;border:1px solid #f59e0b;border-radius:10px;padding:1rem;'>
-    <b style='color:#f59e0b;'>✨ Fair Value Gap</b><br>
-    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>₹{last_c*0.99:.2f}–₹{last_c*1.01:.2f}</span><br>
-    <span style='color:#8892b0;font-size:.8rem;'>FVG (partially filled)</span></div>""", unsafe_allow_html=True)
+    <b style='color:#f59e0b;'>✨ Fair Value Gaps</b><br>
+    <span style='color:#e8eaf6;font-size:1.1rem;font-weight:700;'>{fvg_count}</span><br>
+    <span style='color:#8892b0;font-size:.8rem;'>Detected from the live OHLCV history</span></div>""", unsafe_allow_html=True)
