@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { HelpPopover } from "@/components/ui/help-popover";
 
 const STAGES = [
   { label: "Pre-flight" },
@@ -26,15 +27,16 @@ export function AnalyzeCard() {
     setTimeRemaining(28);
     setAnalysisStage(0);
 
+    let current = 0;
     const interval = setInterval(() => {
-      setProgress((p) => {
-        const next = p + 2;
-        const stageIndex = Math.floor((next / 100) * STAGES.length);
-        setAnalysisStage(Math.min(stageIndex, STAGES.length - 1));
-        setTimeRemaining(Math.max(0, Math.ceil(28 * (1 - next / 100))));
-        if (next >= 100) clearInterval(interval);
-        return Math.min(next, 100);
-      });
+      current = Math.min(current + 2, 100);
+      setProgress(current);
+      setAnalysisStage(Math.min(
+        Math.floor((current / 100) * STAGES.length),
+        STAGES.length - 1
+      ));
+      setTimeRemaining(Math.max(0, Math.ceil(28 * (1 - current / 100))));
+      if (current >= 100) clearInterval(interval);
     }, 600);
     return () => clearInterval(interval);
   }, [isAnalyzing, setAnalysisStage]);
@@ -67,12 +69,20 @@ export function AnalyzeCard() {
   return (
     <div className="card-base p-5 border-t-4 border-t-saffron">
       <div className="flex flex-wrap items-center gap-4">
-        {/* Left: Ticker */}
-        <div className="min-w-0">
-          <div className="text-2xl font-bold text-text-primary tabular-nums">{selectedTicker}</div>
-          <div className="text-sm text-text-muted mt-0.5">
-            {selectedTicker === "RELIANCE.NS" ? "Reliance Industries Ltd" : "NSE Listed Security"}
+        {/* Left: Ticker + Help */}
+        <div className="min-w-0 flex items-start gap-2">
+          <div>
+            <div className="text-2xl font-bold text-text-primary tabular-nums">{selectedTicker}</div>
+            <div className="text-sm text-text-muted mt-0.5">
+              {selectedTicker === "RELIANCE.NS" ? "Reliance Industries Ltd" : "NSE Listed Security"}
+            </div>
           </div>
+          <HelpPopover content={{
+            title: "How the Analysis Works",
+            body: "Clicking Run Analysis triggers a 9-agent LangGraph pipeline: (1) Pre-flight checks, (2) Market data fetch, (3) ML model predictions, (4) 9 AI agents reason in parallel, (5) Synthesis into a final verdict with confidence score.",
+            affectsVerdict: "Each agent contributes a weighted score. Macro, Technical, and ML signals each carry ~30% weight. Sentiment carries ~20%. F&O adjusts the final confidence.",
+            source: "api/routes/analyze.py → LangGraph orchestration → 9-agent pipeline",
+          }} />
         </div>
 
         {/* Center: Controls */}
@@ -119,6 +129,25 @@ export function AnalyzeCard() {
               />
             </div>
             <span className="text-sm text-text-secondary">Include F&O</span>
+          </label>
+
+          {/* Include Sentiment toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <div
+              onClick={() => setIncludeSentiment(!includeSentiment)}
+              className={cn(
+                "relative w-10 h-5 rounded-pill transition-colors duration-150",
+                includeSentiment ? "bg-saffron" : "bg-border"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150",
+                  includeSentiment ? "left-5" : "left-0.5"
+                )}
+              />
+            </div>
+            <span className="text-sm text-text-secondary">Sentiment</span>
           </label>
         </div>
 

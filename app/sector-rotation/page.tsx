@@ -1,15 +1,19 @@
 "use client";
 import useSWR from "swr";
-import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
+import {
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Cell, ReferenceLine,
+} from "recharts";
 import { HelpPopover } from "@/components/ui/help-popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { getApiErrorMessage } from "@/lib/api-client";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchSectorData() {
   const res = await fetch(`${BASE_URL}/macro/sector-rotation`);
+  // Return null for 404 — endpoint not yet implemented in backend
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -23,14 +27,21 @@ interface SectorPoint {
 }
 
 const PHASE_COLORS: Record<string, string> = {
-  LEADING: "#059669",
+  LEADING:   "#059669",
   IMPROVING: "#65A30D",
-  LAGGING: "#DC2626",
+  LAGGING:   "#DC2626",
   WEAKENING: "#D97706",
 };
 
+const QUADRANTS = [
+  { phase: "LEADING",   label: "Leading",   desc: "High RS + Rising Momentum — best to invest",  bg: "bg-bullish-bg",  color: "text-bullish-green" },
+  { phase: "IMPROVING", label: "Improving", desc: "Low RS + Rising Momentum — early entry zone",  bg: "bg-surface-raised", color: "text-text-secondary" },
+  { phase: "WEAKENING", label: "Weakening", desc: "High RS + Falling Momentum — consider exit",   bg: "bg-warning-bg",  color: "text-warning-amber" },
+  { phase: "LAGGING",   label: "Lagging",   desc: "Low RS + Falling Momentum — avoid",            bg: "bg-bearish-bg",  color: "text-bearish-red" },
+];
+
 export default function SectorRotationPage() {
-  const { data, error, isLoading } = useSWR<SectorPoint[]>(
+  const { data, error, isLoading } = useSWR<SectorPoint[] | null>(
     "sector-rotation",
     fetchSectorData,
     { revalidateOnFocus: false, refreshInterval: 15 * 60 * 1000 }
@@ -45,29 +56,97 @@ export default function SectorRotationPage() {
     );
   }
 
-  if (error) {
+  const heading = (
+    <div className="flex items-center gap-2">
+      <h1 className="text-xl font-semibold text-text-primary">Sector Rotation</h1>
+      <HelpPopover content={{
+        title: "What is Sector Rotation?",
+        body: "Money flows between sectors of the economy in predictable cycles. The Relative Rotation Graph (RRG) plots each sector's momentum versus its strength relative to the Nifty50 benchmark, showing which sectors are gaining or losing favour.",
+        affectsVerdict: "When the selected stock's sector is in the Leading quadrant, bullish signals receive higher weighting in the macro agent.",
+        source: "NSE sector indices — rolling 12-week momentum and relative strength vs Nifty50",
+      }} />
+    </div>
+  );
+
+  // ── Endpoint not yet available ─────────────────────────────────────────
+  if (!data || (Array.isArray(data) && data.length === 0) || error) {
     return (
       <div className="space-y-6 max-w-screen-2xl mx-auto">
-        <h1 className="text-xl font-semibold text-text-primary">Sector Rotation</h1>
-        <div className="card-base p-8 text-center">
-          <p className="text-bearish-red font-medium mb-2">Failed to load sector data</p>
-          <p className="text-sm text-text-muted">{getApiErrorMessage(error)}</p>
+        {heading}
+
+        {error && (
+          <div className="rounded-btn border border-warning-amber/30 bg-warning-bg px-4 py-3 text-sm text-warning-amber">
+            API returned an error — sector rotation data unavailable right now.
+          </div>
+        )}
+
+        {/* Educational content while endpoint is pending */}
+        <div className="card-base p-6">
+          <h3 className="text-base font-semibold text-text-primary mb-1">
+            Relative Rotation Graph (RRG) — How to Read It
+          </h3>
+          <p className="text-sm text-text-secondary leading-relaxed mb-6">
+            The RRG divides the market into four quadrants based on two axes: Relative Strength (RS) versus
+            the benchmark and Momentum of that RS. Sectors rotate clockwise through the quadrants over time.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {QUADRANTS.map((q) => (
+              <div key={q.phase} className={cn("p-4 rounded-card border border-border", q.bg)}>
+                <div className={cn("font-bold text-sm mb-1", q.color)}>{q.label}</div>
+                <p className="text-xs text-text-secondary leading-relaxed">{q.desc}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-text-muted mt-6 border-t border-border pt-4">
+            This page will populate automatically once the backend exposes{" "}
+            <code className="text-text-secondary">GET /macro/sector-rotation</code>. The endpoint
+            computes rolling 12-week momentum and RS for each NSE sector index using yfinance.
+          </p>
+        </div>
+
+        {/* How to interpret */}
+        <div className="card-base p-5">
+          <h3 className="text-base font-semibold text-text-primary mb-4">How to Use Sector Rotation in Your Decisions</h3>
+          <div className="space-y-3">
+            {[
+              {
+                step: "1",
+                title: "Find your stock's sector",
+                body: "Every NSE stock belongs to one of 13 GICS sectors — IT, Banking, FMCG, Auto, Pharma, Energy, Metals, Realty, Media, Telecom, Infrastructure, Chemicals, and Consumer Durables.",
+              },
+              {
+                step: "2",
+                title: "Check the quadrant",
+                body: "If your sector is in Leading: tailwind for bullish positions. If Lagging: headwind. Improving sectors are early-entry opportunities; Weakening sectors may be past their peak.",
+              },
+              {
+                step: "3",
+                title: "Watch for rotations",
+                body: "Sectors rotate clockwise. A sector moving from Improving → Leading is gaining momentum. A sector drifting from Leading → Weakening is topping out.",
+              },
+              {
+                step: "4",
+                title: "Combine with FII flows",
+                body: "FII inflows into a specific sector (visible in the F&O participant OI data) combined with a Leading quadrant position is the strongest confirmation of a sector trade.",
+              },
+            ].map((item) => (
+              <div key={item.step} className="flex gap-4 p-4 rounded-btn bg-surface-raised">
+                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-saffron flex items-center justify-center text-white text-xs font-bold">
+                  {item.step}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-text-primary mb-0.5">{item.title}</div>
+                  <p className="text-xs text-text-secondary leading-relaxed">{item.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!data || data.length === 0) {
-    return (
-      <div className="space-y-6 max-w-screen-2xl mx-auto">
-        <h1 className="text-xl font-semibold text-text-primary">Sector Rotation</h1>
-        <div className="card-base p-8 text-center text-text-muted">
-          <p className="text-sm">No sector rotation data available. Ensure the API backend exposes <code className="text-text-secondary">/macro/sector-rotation</code>.</p>
-        </div>
-      </div>
-    );
-  }
-
+  // ── Live RRG when endpoint is available ────────────────────────────────
   const grouped = data.reduce<Record<string, SectorPoint[]>>((acc, d) => {
     (acc[d.phase] = acc[d.phase] ?? []).push(d);
     return acc;
@@ -75,17 +154,8 @@ export default function SectorRotationPage() {
 
   return (
     <div className="space-y-6 max-w-screen-2xl mx-auto">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold text-text-primary">Sector Rotation</h1>
-        <HelpPopover content={{
-          title: "Sector Rotation — RRG Chart",
-          body: "Relative Rotation Graph plots sector momentum vs relative strength. Leading quadrant = strongest sectors to invest in.",
-          affectsVerdict: "When the selected stock's sector is in the Leading quadrant, bullish signals receive higher weighting.",
-          source: "NSE sector indices — rolling 12-week momentum & relative strength vs Nifty50",
-        }} />
-      </div>
+      {heading}
 
-      {/* RRG Scatter */}
       <div className="card-base p-5">
         <h3 className="text-base font-semibold text-text-primary mb-4">Relative Rotation Graph (RRG)</h3>
         <div className="h-96">
@@ -106,33 +176,18 @@ export default function SectorRotationPage() {
                 tick={{ fontSize: 10, fill: "#94A3B8" }}
                 tickLine={false}
                 axisLine={false}
-                label={{ value: "↑ Momentum", angle: -90, position: "insideLeft", offset: 10, fontSize: 10, fill: "#94A3B8" }}
+                label={{ value: "Momentum ↑", angle: -90, position: "insideLeft", offset: 10, fontSize: 10, fill: "#94A3B8" }}
               />
               <ReferenceLine x={100} stroke="hsl(var(--border))" strokeWidth={1.5} />
               <ReferenceLine y={100} stroke="hsl(var(--border))" strokeWidth={1.5} />
               <Tooltip
                 cursor={{ strokeDasharray: "3 3" }}
-                contentStyle={{
-                  background: "hsl(var(--surface))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                formatter={(_: unknown, name: string, props: { payload?: SectorPoint }) => {
-                  if (name === "relative_strength") return [props.payload?.relative_strength.toFixed(1), "Rel. Strength"];
-                  if (name === "momentum") return [props.payload?.momentum.toFixed(1), "Momentum"];
-                  return [_, name];
-                }}
+                contentStyle={{ background: "hsl(var(--surface))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                 labelFormatter={(_: unknown, payload: { payload?: SectorPoint }[]) => payload?.[0]?.payload?.sector ?? ""}
               />
               {Object.entries(grouped).map(([phase, points]) => (
-                <Scatter
-                  key={phase}
-                  name={phase}
-                  data={points}
-                  fill={PHASE_COLORS[phase] ?? "#94A3B8"}
-                >
-                  {points.map((p, i) => (
+                <Scatter key={phase} name={phase} data={points} fill={PHASE_COLORS[phase] ?? "#94A3B8"}>
+                  {points.map((_, i) => (
                     <Cell key={i} fill={PHASE_COLORS[phase] ?? "#94A3B8"} />
                   ))}
                 </Scatter>
@@ -140,15 +195,8 @@ export default function SectorRotationPage() {
             </ScatterChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Quadrant labels */}
         <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
-          {[
-            { phase: "LEADING", label: "Leading", desc: "High RS + Rising Momentum", bg: "bg-bullish-bg", color: "text-bullish-green" },
-            { phase: "IMPROVING", label: "Improving", desc: "Low RS + Rising Momentum", bg: "bg-surface-raised", color: "text-text-secondary" },
-            { phase: "WEAKENING", label: "Weakening", desc: "High RS + Falling Momentum", bg: "bg-warning-bg", color: "text-warning-amber" },
-            { phase: "LAGGING", label: "Lagging", desc: "Low RS + Falling Momentum", bg: "bg-bearish-bg", color: "text-bearish-red" },
-          ].map((q) => (
+          {QUADRANTS.map((q) => (
             <div key={q.phase} className={cn("p-3 rounded-btn", q.bg)}>
               <div className={cn("font-semibold mb-0.5", q.color)}>{q.label}</div>
               <div className="text-text-muted">{q.desc}</div>
@@ -160,7 +208,6 @@ export default function SectorRotationPage() {
         </div>
       </div>
 
-      {/* Sector table */}
       <div className="card-base p-5">
         <h3 className="text-base font-semibold text-text-primary mb-4">All Sectors</h3>
         <div className="overflow-x-auto">
@@ -190,10 +237,7 @@ export default function SectorRotationPage() {
                   <td className="py-2.5 pl-4">
                     <span
                       className="px-2 py-0.5 rounded-badge text-xs font-semibold"
-                      style={{
-                        color: PHASE_COLORS[row.phase] ?? "#94A3B8",
-                        background: `${PHASE_COLORS[row.phase] ?? "#94A3B8"}18`,
-                      }}
+                      style={{ color: PHASE_COLORS[row.phase] ?? "#94A3B8", background: `${PHASE_COLORS[row.phase] ?? "#94A3B8"}18` }}
                     >
                       {row.phase}
                     </span>

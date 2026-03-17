@@ -181,21 +181,29 @@ export default function BacktestPage() {
 
           {/* Blueprint Gate */}
           <div className={cn(
-            "card-base p-4 flex items-center gap-3",
+            "card-base p-4 flex items-start gap-3",
             result.blueprint_gate_passed ? "border-bullish-green/20 bg-bullish-bg" : "border-bearish-red/20 bg-bearish-bg"
           )}>
             <div className={cn(
-              "w-3 h-3 rounded-full flex-shrink-0",
+              "w-3 h-3 rounded-full flex-shrink-0 mt-1",
               result.blueprint_gate_passed ? "bg-bullish-green" : "bg-bearish-red"
             )} />
-            <div>
-              <span className={cn("font-semibold", result.blueprint_gate_passed ? "text-bullish-green" : "text-bearish-red")}>
-                Blueprint Gate: {result.blueprint_gate_passed ? "PASSED" : "FAILED"}
-              </span>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className={cn("font-semibold", result.blueprint_gate_passed ? "text-bullish-green" : "text-bearish-red")}>
+                  Blueprint Gate: {result.blueprint_gate_passed ? "PASSED" : "FAILED"}
+                </span>
+                <HelpPopover content={{
+                  title: "What is the Blueprint Gate?",
+                  body: "A minimum quality filter for deploying a strategy live. All three conditions must pass: Sharpe ratio > 0.8 (risk-adjusted return), Max drawdown < 30% (worst loss from peak), Win rate > 45% (more winning trades than losing).",
+                  affectsVerdict: "A FAILED gate means the strategy has historically underperformed and should not be used for live trading decisions. Adjust the strategy or use a different instrument.",
+                  source: "backtesting/engine.py — evaluated on historical NSE data",
+                }} />
+              </div>
               <p className="text-xs text-text-muted mt-0.5">
                 {result.blueprint_gate_passed
-                  ? "Strategy meets minimum quality thresholds (Sharpe > 0.8, DD < 30%, Win rate > 45%)"
-                  : "Strategy does not meet minimum quality thresholds for live deployment"}
+                  ? `Sharpe ${result.sharpe_ratio.toFixed(2)} > 0.8 ✓ | Drawdown ${result.max_drawdown_pct.toFixed(1)}% < 30% ✓ | Win rate ${result.win_rate_pct.toFixed(1)}% > 45% ✓`
+                  : `Requirements: Sharpe > 0.8 (got ${result.sharpe_ratio.toFixed(2)}) | Drawdown < 30% (got ${result.max_drawdown_pct.toFixed(1)}%) | Win rate > 45% (got ${result.win_rate_pct.toFixed(1)}%)`}
               </p>
             </div>
           </div>

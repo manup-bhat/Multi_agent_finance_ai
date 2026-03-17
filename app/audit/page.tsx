@@ -13,6 +13,8 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchAudit(ticker: string) {
   const res = await fetch(`${BASE_URL}/audit/${encodeURIComponent(ticker)}`);
+  // 404 → endpoint not yet registered; return empty array (not an error)
+  if (res.status === 404) return [];
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -99,9 +101,36 @@ export default function AuditPage() {
       )}
 
       {!isLoading && !error && (!entries || entries.length === 0) && (
-        <div className="card-base p-8 text-center text-text-muted">
-          <p className="font-medium text-text-secondary mb-2">No audit entries found</p>
-          <p className="text-sm">Run an analysis for {auditTicker} to start building the audit trail.</p>
+        <div className="space-y-4">
+          <div className="card-base p-6 text-center">
+            <p className="font-medium text-text-secondary mb-2">No audit entries for {auditTicker} yet</p>
+            <p className="text-sm text-text-muted mb-4">
+              Run an analysis from the Dashboard to start building the audit trail.
+              Every run is automatically logged with a full feature snapshot.
+            </p>
+          </div>
+          <div className="card-base p-5">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">What is the Audit Trail?</h3>
+            <div className="space-y-3">
+              {[
+                { title: "Immutable run log", body: "Every analysis run is recorded with a unique run ID, timestamp, and full inputs — so you can always trace why a verdict was given." },
+                { title: "Feature snapshot", body: "Captures the exact value of every input feature (RSI, VIX, FII net, MACD, etc.) at the moment of the prediction — no ambiguity." },
+                { title: "Agent outputs", body: "Lists which agents ran, what they returned, and whether any errors or warnings were raised during the pipeline." },
+                { title: "Post-trade review", body: "Use the audit trail to review whether signals were based on clean data, or to debug unexpected verdicts after the fact." },
+              ].map((item) => (
+                <div key={item.title} className="flex gap-3 p-3 rounded-btn bg-surface-raised">
+                  <div className="w-1.5 h-1.5 rounded-full bg-saffron flex-shrink-0 mt-1.5" />
+                  <div>
+                    <div className="text-xs font-semibold text-text-primary">{item.title}</div>
+                    <p className="text-xs text-text-muted mt-0.5 leading-relaxed">{item.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-text-muted mt-4 pt-3 border-t border-border">
+              The backend must expose <code className="text-text-secondary">GET /audit/{"{ticker}"}</code> to populate this page.
+            </p>
+          </div>
         </div>
       )}
 

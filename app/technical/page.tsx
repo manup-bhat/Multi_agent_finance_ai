@@ -146,7 +146,15 @@ export default function TechnicalPage() {
       {/* EMA Trend */}
       {ema21 && ema50 && close && (
         <div className="card-base p-5">
-          <h3 className="text-base font-semibold text-text-primary mb-4">EMA Trend</h3>
+          <div className="flex items-center gap-2 mb-4">
+            <h3 className="text-base font-semibold text-text-primary">EMA Trend</h3>
+            <HelpPopover content={{
+              title: "Exponential Moving Averages",
+              body: "EMA21 tracks the last 21 days, EMA50 tracks 50 days. When price is above EMA21 and EMA21 is above EMA50, the trend is bullish. Crossovers are strong signals.",
+              affectsVerdict: "Price > EMA21 > EMA50 is a key condition for a BULLISH regime classification in the trend agent.",
+              source: "Computed on NSE daily OHLCV — technical_analyzer.py",
+            }} />
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               {

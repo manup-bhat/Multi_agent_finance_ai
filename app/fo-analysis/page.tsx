@@ -82,8 +82,16 @@ export default function FOPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {/* PCR */}
             <div className="card-base p-5">
-              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
-                Put-Call Ratio
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  Put-Call Ratio
+                </div>
+                <HelpPopover content={{
+                  title: "Put-Call Ratio (PCR)",
+                  body: "Ratio of total put open interest to call open interest. PCR > 1.2 = high put buying = bullish. PCR < 0.8 = high call buying = bearish.",
+                  affectsVerdict: "PCR is a direct input to the F&O agent's bullish/bearish scoring. Extreme PCR values (>1.5 or <0.6) trigger higher confidence.",
+                  source: "NSE option chain — calculated from total OI",
+                }} />
               </div>
               <div className={cn(
                 "text-4xl font-bold tabular-nums",
@@ -106,8 +114,16 @@ export default function FOPage() {
 
             {/* Max Pain */}
             <div className="card-base p-5">
-              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
-                Max Pain
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  Max Pain
+                </div>
+                <HelpPopover content={{
+                  title: "Max Pain Strike",
+                  body: "The strike price at which the maximum number of options contracts (both puts and calls) expire worthless. The underlying tends to gravitate toward max pain near expiry.",
+                  affectsVerdict: "If current price is far above max pain, options writers will hedge downward — a bearish pressure near expiry.",
+                  source: "Calculated from full NSE option chain open interest",
+                }} />
               </div>
               <div className="text-4xl font-bold tabular-nums text-text-primary">
                 {fno.max_pain != null
@@ -121,8 +137,16 @@ export default function FOPage() {
 
             {/* IV Rank */}
             <div className="card-base p-5">
-              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
-                IV Rank
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  IV Rank
+                </div>
+                <HelpPopover content={{
+                  title: "Implied Volatility Rank",
+                  body: "Where current IV sits relative to its 52-week range. IVR > 70 means volatility is high — selling premium (straddles, iron condors) is more attractive. IVR < 30 means volatility is cheap — buy premium.",
+                  affectsVerdict: "High IVR triggers a 'sell premium' strategy recommendation. Low IVR triggers directional buying.",
+                  source: "52-week IV range from NSE option chain historical data",
+                }} />
               </div>
               <div
                 className="text-4xl font-bold tabular-nums"

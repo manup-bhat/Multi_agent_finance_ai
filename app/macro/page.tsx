@@ -103,7 +103,15 @@ export default function MacroPage() {
 
   return (
     <div className="space-y-6 max-w-screen-2xl mx-auto">
-      <h1 className="text-xl font-semibold text-text-primary">Macro India</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-xl font-semibold text-text-primary">Macro India</h1>
+        <HelpPopover content={{
+          title: "What is Macro Analysis?",
+          body: "Macro analysis looks at the big picture — market fear (VIX), currency strength (USD/INR), commodity prices (crude oil), and foreign investor flows (FII). These factors affect all NSE stocks.",
+          affectsVerdict: "If VIX is elevated, USD is weak, or FII is selling heavily, the macro agent assigns a bearish macro score regardless of individual stock technicals.",
+          source: "Live data: NSE, yfinance — refreshed every 10 minutes",
+        }} />
+      </div>
 
       {/* Global Cues */}
       <div className="card-base p-5">
