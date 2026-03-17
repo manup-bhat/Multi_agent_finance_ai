@@ -116,7 +116,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           />
           {!collapsed && (
             <span className="text-xs text-text-muted">
-              {apiConnected ? "API Connected" : "Mock Data"}
+              {apiConnected ? "API Connected" : "API Offline"}
             </span>
           )}
         </div>

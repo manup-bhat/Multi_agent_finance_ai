@@ -1,290 +1,267 @@
 "use client";
+import useSWR from "swr";
 import { useState } from "react";
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, AreaChart, Area
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { cn } from "@/lib/utils";
 import { HelpPopover } from "@/components/ui/help-popover";
-import { MOCK_OPTION_CHAIN } from "@/lib/mock-data";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
+import { getFnO, getApiErrorMessage } from "@/lib/api-client";
 
-const STRIKE_FILTERS = ["All Strikes", "ATM ±10", "ATM ±5"] as const;
-
-// Payoff for Iron Condor: short 22000CE, long 22400CE, short 21600PE, long 21200PE
-function getIronCondorPayoff(price: number): number {
-  const premium = 42; // net credit
-  const shortCall = 22000, longCall = 22400;
-  const shortPut = 21600, longPut = 21200;
-  let pnl = premium;
-  if (price > shortCall) pnl -= (price - shortCall);
-  if (price > longCall) pnl += (price - longCall);
-  if (price < shortPut) pnl -= (shortPut - price);
-  if (price < longPut) pnl += (longPut - price);
-  return pnl * 100; // lot size factor (simplified)
-}
-
-const PAYOFF_DATA = Array.from({ length: 50 }, (_, i) => {
-  const price = 20500 + i * 80;
-  return { price, pnl: getIronCondorPayoff(price) };
-});
+const NSE_SYMBOLS = ["BANKNIFTY", "NIFTY", "FINNIFTY", "MIDCPNIFTY"];
 
 export default function FOPage() {
-  const { analysisData } = useApp();
-  const [strikeFilter, setStrikeFilter] = useState<typeof STRIKE_FILTERS[number]>("ATM ±10");
+  const { selectedTicker, analysisData } = useApp();
+  const [symbol, setSymbol] = useState("BANKNIFTY");
 
-  const atm = 22000;
-  const filterMap: Record<typeof STRIKE_FILTERS[number], number> = { "All Strikes": 50, "ATM ±10": 10, "ATM ±5": 5 };
-  const filterSteps = filterMap[strikeFilter];
+  const { data: fno, error, isLoading } = useSWR(
+    ["fno", symbol],
+    () => getFnO(symbol),
+    { revalidateOnFocus: false }
+  );
 
-  const filteredChain = MOCK_OPTION_CHAIN.filter((row) => Math.abs(row.strike - atm) <= filterSteps * 100);
+  // IV rank bar color
+  const ivRankColor = (rank: number | null) =>
+    rank == null ? "#94A3B8" : rank > 70 ? "#059669" : rank > 40 ? "#D97706" : "#DC2626";
 
-  // IV smile data
-  const ivSmileData = MOCK_OPTION_CHAIN.map((row) => ({
-    strike: row.strike,
-    callIV: row.call.iv,
-    putIV: row.put.iv,
-    histIV: row.call.iv * 0.82 + 2,
-  }));
+  if (isLoading) {
+    return (
+      <div className="space-y-6 max-w-screen-2xl mx-auto">
+        <Skeleton className="h-7 w-44" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
 
-  // Top OI buildup
-  const oiBuildup = [...MOCK_OPTION_CHAIN]
-    .flatMap((row) => [
-      { strike: row.strike, type: "CE", oiChange: row.call.oiChange },
-      { strike: row.strike, type: "PE", oiChange: row.put.oiChange },
-    ])
-    .sort((a, b) => Math.abs(b.oiChange) - Math.abs(a.oiChange))
-    .slice(0, 10);
-
-  const pcr = analysisData?.pcr ?? 1.32;
+  if (error) {
+    return (
+      <div className="space-y-6 max-w-screen-2xl mx-auto">
+        <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
+        <div className="card-base p-8 text-center">
+          <p className="text-bearish-red font-medium mb-2">Failed to load F&O data</p>
+          <p className="text-sm text-text-muted">{getApiErrorMessage(error)}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-screen-2xl mx-auto">
-      <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
-
-      {/* Summary KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card-base p-5">
-          <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">Put-Call Ratio</div>
-          <div className="text-4xl font-bold tabular-nums text-bullish-green">{pcr.toFixed(2)}</div>
-          <span className="inline-flex mt-1 px-2 py-0.5 rounded-badge bg-bullish-bg text-bullish-green text-xs font-medium">Bullish Zone</span>
-          <div className="mt-2 h-2 bg-surface-raised rounded-pill overflow-hidden">
-            <div className="h-full bg-bullish-green rounded-pill transition-all duration-500" style={{ width: `${Math.min(pcr / 2, 1) * 100}%` }} />
-          </div>
-        </div>
-        <div className="card-base p-5">
-          <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">Max Pain</div>
-          <div className="text-4xl font-bold tabular-nums text-text-primary">₹22,000</div>
-          <div className="text-xs text-text-muted mt-1">Current ₹22,143 (+0.6% above)</div>
-          <div className="mt-2 h-2 bg-surface-raised rounded-pill overflow-hidden">
-            <div className="h-full bg-warning-amber rounded-pill" style={{ width: "52%" }} />
-          </div>
-        </div>
-        <div className="card-base p-5">
-          <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">IV Rank</div>
-          <div className="text-4xl font-bold tabular-nums text-warning-amber">42</div>
-          <span className="inline-flex mt-1 px-2 py-0.5 rounded-badge bg-warning-bg text-warning-amber text-xs font-medium">Moderate</span>
-          <div className="mt-2 h-2 bg-surface-raised rounded-pill overflow-hidden">
-            <div className="h-full bg-warning-amber rounded-pill" style={{ width: "42%" }} />
-          </div>
-        </div>
-        <div className="card-base p-5">
-          <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">Days to Expiry</div>
-          <div className="text-4xl font-bold tabular-nums text-bearish-red">3</div>
-          <span className="inline-flex mt-1 px-2 py-0.5 rounded-badge bg-bearish-bg text-bearish-red text-xs font-medium">Expiry Thursday</span>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
+        {/* Symbol selector */}
+        <div className="flex gap-1">
+          {NSE_SYMBOLS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setSymbol(s)}
+              className={cn(
+                "px-3 py-1.5 text-xs rounded-badge font-medium transition-all duration-150",
+                symbol === s
+                  ? "bg-saffron text-white"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-raised"
+              )}
+            >
+              {s}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Option Chain Table */}
-      <div className="card-base p-5">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-text-primary">Option Chain</h3>
-            <HelpPopover content={{
-              title: "Option Chain",
-              body: "Live option chain showing OI, IV, volume and LTP for calls and puts at each strike. ATM strike is highlighted with saffron border.",
-              affectsVerdict: "High call OI = resistance, high put OI = support. PCR and max pain are derived from this data.",
-              source: "NSE India via nsefin — refreshed every 5 minutes during market hours",
-            }} />
-          </div>
-          <div className="flex gap-1">
-            {STRIKE_FILTERS.map((f) => (
-              <button key={f} onClick={() => setStrikeFilter(f)}
-                className={cn("px-2.5 py-1 text-xs rounded-badge font-medium transition-all duration-150",
-                  strikeFilter === f ? "bg-saffron text-white" : "text-text-muted hover:bg-surface-raised hover:text-text-primary")}>
-                {f}
-              </button>
-            ))}
-          </div>
+      {!fno ? (
+        <div className="card-base p-8 text-center text-text-muted">
+          <p className="font-medium text-text-secondary mb-2">No F&O data available</p>
+          <p className="text-sm">Run an analysis from the Dashboard with F&O enabled.</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                <th colSpan={5} className="text-center py-2 text-saffron font-semibold text-xs border-r border-border">CALLS</th>
-                <th className="py-2 px-4 text-center font-bold text-text-primary text-sm">STRIKE</th>
-                <th colSpan={5} className="text-center py-2 text-neutral-blue font-semibold text-xs border-l border-border">PUTS</th>
-              </tr>
-              <tr className="border-b border-border text-text-muted bg-surface-raised/50">
-                <th className="py-2 px-3 text-right font-medium border-r border-border">OI</th>
-                <th className="py-2 px-3 text-right font-medium">OI Chg</th>
-                <th className="py-2 px-3 text-right font-medium">Vol</th>
-                <th className="py-2 px-3 text-right font-medium">IV%</th>
-                <th className="py-2 px-3 text-right font-medium border-r border-border">LTP</th>
-                <th className="py-2 px-4 text-center font-bold text-text-primary">—</th>
-                <th className="py-2 px-3 text-left font-medium border-l border-border">LTP</th>
-                <th className="py-2 px-3 text-left font-medium">IV%</th>
-                <th className="py-2 px-3 text-left font-medium">Vol</th>
-                <th className="py-2 px-3 text-left font-medium">OI Chg</th>
-                <th className="py-2 px-3 text-left font-medium">OI</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filteredChain.map((row) => (
-                <tr
-                  key={row.strike}
-                  className={cn(
-                    "transition-colors duration-150",
-                    row.isATM
-                      ? "bg-saffron-light border-l-2 border-l-saffron"
-                      : "hover:bg-surface-raised"
-                  )}
-                >
-                  <td className="py-2.5 px-3 text-right tabular-nums text-text-secondary border-r border-border">{(row.call.oi / 1000).toFixed(0)}K</td>
-                  <td className={cn("py-2.5 px-3 text-right tabular-nums", row.call.oiChange >= 0 ? "text-bullish-green" : "text-bearish-red")}>
-                    {row.call.oiChange >= 0 ? "+" : ""}{(row.call.oiChange / 1000).toFixed(0)}K
-                  </td>
-                  <td className="py-2.5 px-3 text-right tabular-nums text-text-muted">{(row.call.volume / 1000).toFixed(0)}K</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums text-text-secondary">{row.call.iv.toFixed(1)}</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums text-text-primary font-medium border-r border-border">₹{row.call.ltp.toFixed(2)}</td>
-                  <td className={cn("py-2.5 px-4 text-center font-bold text-sm", row.isATM ? "text-saffron" : "text-text-primary")}>{row.strike.toLocaleString("en-IN")}</td>
-                  <td className="py-2.5 px-3 text-left tabular-nums text-text-primary font-medium border-l border-border">₹{row.put.ltp.toFixed(2)}</td>
-                  <td className="py-2.5 px-3 text-left tabular-nums text-text-secondary">{row.put.iv.toFixed(1)}</td>
-                  <td className="py-2.5 px-3 text-left tabular-nums text-text-muted">{(row.put.volume / 1000).toFixed(0)}K</td>
-                  <td className={cn("py-2.5 px-3 text-left tabular-nums", row.put.oiChange >= 0 ? "text-bullish-green" : "text-bearish-red")}>
-                    {row.put.oiChange >= 0 ? "+" : ""}{(row.put.oiChange / 1000).toFixed(0)}K
-                  </td>
-                  <td className="py-2.5 px-3 text-left tabular-nums text-text-secondary">{(row.put.oi / 1000).toFixed(0)}K</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* IV Surface + Payoff Diagram */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card-base p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <h3 className="text-base font-semibold text-text-primary">IV Smile</h3>
-            <HelpPopover content={{
-              title: "Implied Volatility Smile",
-              body: "IV across strikes forms a smile/skew shape — higher IV for OTM options vs ATM. The gap between current IV and historical avg shows IV premium.",
-              affectsVerdict: "When current IV is well above historical average, selling options (like Iron Condor) is preferred. Low IV → buying strategies.",
-              source: "NSE option chain implied volatility — computed via Black-Scholes",
-            }} />
-          </div>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={ivSmileData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(214,32%,91%)" opacity={0.4} />
-                <XAxis dataKey="strike" tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} axisLine={false}
-                  interval={3} tickFormatter={(v) => v.toLocaleString("en-IN")} />
-                <YAxis tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v.toFixed(0)}%`} />
-                <Tooltip
-                  contentStyle={{ background: "hsl(var(--surface))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [`${v.toFixed(1)}%`, ""]}
-                />
-                <Area type="monotone" dataKey="callIV" stroke="#FF6B00" fill="#FF6B00" fillOpacity={0.1} strokeWidth={2} name="Current IV" />
-                <Line type="monotone" dataKey="histIV" stroke="#94A3B8" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="Hist Avg IV" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card-base p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <h3 className="text-base font-semibold text-text-primary">Iron Condor Payoff</h3>
-            <HelpPopover content={{
-              title: "Strategy Payoff Diagram",
-              body: "Shows profit/loss at expiry for every underlying price. The Iron Condor profits when the stock stays within the breakeven range.",
-              affectsVerdict: "Strategy is chosen based on IV Rank (>30 → sell premium) and PCR (1.32 → neutral-bullish range trade).",
-              source: "F&O strategy simulator — Black-Scholes Greeks + payoff engine",
-            }} />
-          </div>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={PAYOFF_DATA} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(214,32%,91%)" opacity={0.4} />
-                <XAxis dataKey="price" tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} axisLine={false}
-                  interval={7} tickFormatter={(v) => v.toLocaleString("en-IN")} />
-                <YAxis tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} axisLine={false}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} />
-                <Tooltip
-                  contentStyle={{ background: "hsl(var(--surface))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [`₹${v.toLocaleString("en-IN")}`, "P&L"]}
-                />
-                <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                <ReferenceLine x={21680} stroke="#DC2626" strokeDasharray="3 2" label={{ value: "BE₁", position: "top", fontSize: 9, fill: "#DC2626" }} />
-                <ReferenceLine x={22320} stroke="#DC2626" strokeDasharray="3 2" label={{ value: "BE₂", position: "top", fontSize: 9, fill: "#DC2626" }} />
-                <ReferenceLine x={22143} stroke="#FF6B00" strokeDasharray="3 2" label={{ value: "CMP", position: "top", fontSize: 9, fill: "#FF6B00" }} />
-                <Area type="monotone" dataKey="pnl" stroke="#059669" fill="#059669" fillOpacity={0.1} strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-            <div className="text-center p-2 rounded-btn bg-bullish-bg">
-              <div className="text-text-muted">Max Profit</div>
-              <div className="font-bold text-bullish-green">₹4,200</div>
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* PCR */}
+            <div className="card-base p-5">
+              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+                Put-Call Ratio
+              </div>
+              <div className={cn(
+                "text-4xl font-bold tabular-nums",
+                fno.pcr == null ? "text-text-muted"
+                  : fno.pcr > 1.2 ? "text-bullish-green"
+                  : fno.pcr < 0.8 ? "text-bearish-red"
+                  : "text-warning-amber"
+              )}>
+                {fno.pcr != null ? fno.pcr.toFixed(2) : "—"}
+              </div>
+              <span className={cn(
+                "inline-flex mt-1 px-2 py-0.5 rounded-badge text-xs font-medium",
+                fno.pcr_signal.includes("Bullish") ? "bg-bullish-bg text-bullish-green"
+                  : fno.pcr_signal.includes("Bearish") ? "bg-bearish-bg text-bearish-red"
+                  : "bg-warning-bg text-warning-amber"
+              )}>
+                {fno.pcr_signal}
+              </span>
             </div>
-            <div className="text-center p-2 rounded-btn bg-bearish-bg">
-              <div className="text-text-muted">Max Loss</div>
-              <div className="font-bold text-bearish-red">₹-11,800</div>
+
+            {/* Max Pain */}
+            <div className="card-base p-5">
+              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+                Max Pain
+              </div>
+              <div className="text-4xl font-bold tabular-nums text-text-primary">
+                {fno.max_pain != null
+                  ? `₹${fno.max_pain.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                  : "—"}
+              </div>
+              <div className="text-xs text-text-muted mt-1">
+                Expiry: {fno.expiry}
+              </div>
             </div>
-            <div className="text-center p-2 rounded-btn bg-neutral-bg">
-              <div className="text-text-muted">Breakevens</div>
-              <div className="font-bold text-neutral-blue">21,680 / 22,320</div>
+
+            {/* IV Rank */}
+            <div className="card-base p-5">
+              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+                IV Rank
+              </div>
+              <div
+                className="text-4xl font-bold tabular-nums"
+                style={{ color: ivRankColor(fno.iv_rank_pct) }}
+              >
+                {fno.iv_rank_pct != null ? `${fno.iv_rank_pct.toFixed(0)}` : "—"}
+              </div>
+              <span className={cn(
+                "inline-flex mt-1 px-2 py-0.5 rounded-badge text-xs font-medium",
+                fno.iv_rank_pct == null ? "bg-surface-raised text-text-muted"
+                  : fno.iv_rank_pct > 70 ? "bg-bullish-bg text-bullish-green"
+                  : fno.iv_rank_pct > 40 ? "bg-warning-bg text-warning-amber"
+                  : "bg-bearish-bg text-bearish-red"
+              )}>
+                {fno.iv_rank_pct == null ? "Unknown"
+                  : fno.iv_rank_pct > 70 ? "High — Sell Premium"
+                  : fno.iv_rank_pct > 40 ? "Moderate"
+                  : "Low — Buy Premium"}
+              </span>
+            </div>
+
+            {/* ATM IV */}
+            <div className="card-base p-5">
+              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+                ATM Implied Volatility
+              </div>
+              <div className="text-4xl font-bold tabular-nums text-text-primary">
+                {fno.atm_iv != null ? `${fno.atm_iv.toFixed(1)}%` : "—"}
+              </div>
+              <div className="text-xs text-text-muted mt-1">
+                IV Skew: {fno.skew ?? "—"}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* OI Buildup Table */}
-      <div className="card-base p-5">
-        <h3 className="text-base font-semibold text-text-primary mb-4">Top OI Buildup</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-text-muted">
-                <th className="text-left py-2 font-medium">Strike</th>
-                <th className="text-left py-2 font-medium">Type</th>
-                <th className="text-right py-2 font-medium">OI Change</th>
-                <th className="text-left py-2 font-medium pl-4">Signal</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {oiBuildup.map((row, i) => (
-                <tr key={i} className="hover:bg-surface-raised transition-colors duration-150">
-                  <td className="py-2.5 font-medium tabular-nums text-text-primary">{row.strike.toLocaleString("en-IN")}</td>
-                  <td className="py-2.5">
-                    <span className={cn("px-2 py-0.5 rounded-badge text-xs font-medium", row.type === "CE" ? "bg-bearish-bg text-bearish-red" : "bg-bullish-bg text-bullish-green")}>
-                      {row.type}
-                    </span>
-                  </td>
-                  <td className={cn("py-2.5 text-right tabular-nums font-medium", row.oiChange >= 0 ? "text-bullish-green" : "text-bearish-red")}>
-                    {row.oiChange >= 0 ? "+" : ""}{(row.oiChange / 1000).toFixed(0)}K
-                  </td>
-                  <td className="py-2.5 pl-4 text-xs text-text-secondary">
-                    {row.type === "CE" && row.oiChange > 0 ? "Strong Resistance" :
-                     row.type === "PE" && row.oiChange > 0 ? "Support Building" :
-                     row.type === "CE" && row.oiChange < 0 ? "Resistance Unwinding" : "Support Unwinding"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          {/* Strategy Recommendation */}
+          <div className="card-base p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-base font-semibold text-text-primary">Strategy Recommendation</h3>
+              <HelpPopover content={{
+                title: "F&O Strategy",
+                body: "Strategy is selected based on IV rank, PCR, max pain distance, and skew. High IV → sell premium; low IV → buy premium.",
+                affectsVerdict: "Recommended strategy is derived from the combined F&O analysis and affects position sizing in the overall verdict.",
+                source: "F&O agent — rules-based strategy selector",
+              }} />
+            </div>
+            <div className="px-4 py-3 rounded-card bg-saffron-light border border-saffron/20">
+              <p className="text-sm font-semibold text-saffron">{fno.strategy_recommendation}</p>
+            </div>
+            <div className="mt-3 text-xs text-text-muted">
+              Source: {fno.source} | FII Futures Net: {fno.fii_futures_net}
+            </div>
+          </div>
+
+          {/* ATM Greeks */}
+          {Object.keys(fno.greeks_atm).length > 0 && (
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-base font-semibold text-text-primary">ATM Option Greeks</h3>
+                <HelpPopover content={{
+                  title: "Option Greeks — ATM Strike",
+                  body: "Greeks measure sensitivity of the ATM option price to changes in underlying, time, and volatility.",
+                  affectsVerdict: "High Gamma near expiry amplifies moves; high Vega means IV changes dominate over delta moves.",
+                  source: "NSE option chain — Black-Scholes Greeks",
+                }} />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {Object.entries(fno.greeks_atm).map(([key, val]) => (
+                  <div key={key} className="text-center p-3 rounded-card bg-surface-raised">
+                    <div className="text-xs text-text-muted uppercase tracking-widest mb-1">{key}</div>
+                    <div className="text-xl font-bold tabular-nums text-text-primary">
+                      {typeof val === "number" ? val.toFixed(4) : val}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Participant OI */}
+          {Object.keys(fno.participant_oi).length > 0 && (
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-base font-semibold text-text-primary">Participant-wise Futures OI</h3>
+                <HelpPopover content={{
+                  title: "Participant Futures Open Interest",
+                  body: "Long/short futures positions per participant category. Retail (Client) net short is historically a contrarian bullish signal.",
+                  affectsVerdict: "FII net long + Client net short is a strong bullish combination.",
+                  source: "NSE combined futures OI — participant-wise daily data",
+                }} />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-text-muted">
+                      <th className="text-left py-2 font-medium">Participant</th>
+                      <th className="text-right py-2 font-medium">Long</th>
+                      <th className="text-right py-2 font-medium">Short</th>
+                      <th className="text-right py-2 font-medium">Net</th>
+                      <th className="text-left py-2 font-medium pl-4">Signal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {Object.entries(fno.participant_oi).map(([participant, data]) => {
+                      const net = data.net ?? ((data.long ?? 0) - (data.short ?? 0));
+                      return (
+                        <tr key={participant} className="hover:bg-surface-raised transition-colors duration-150">
+                          <td className="py-3 font-semibold text-text-primary">{participant}</td>
+                          <td className="py-3 text-right tabular-nums text-bullish-green">
+                            {data.long != null ? data.long.toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className="py-3 text-right tabular-nums text-bearish-red">
+                            {data.short != null ? data.short.toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className={cn(
+                            "py-3 text-right tabular-nums font-bold",
+                            net >= 0 ? "text-bullish-green" : "text-bearish-red"
+                          )}>
+                            {net >= 0 ? "+" : ""}{net.toLocaleString("en-IN")}
+                          </td>
+                          <td className="py-3 pl-4 text-xs text-text-secondary">
+                            {participant === "FII" && net > 0
+                              ? "Bullish — institutional accumulation"
+                              : participant === "Client" && net < 0
+                              ? "Retail net short — contrarian bullish"
+                              : participant === "DII"
+                              ? "Domestic support"
+                              : "Neutral"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -1,11 +1,13 @@
 "use client";
 import { useState, useMemo } from "react";
+import useSWR from "swr";
 import { Menu, Search, Bell, X } from "lucide-react";
 import { cn, getVixStatus, formatCrore } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "./theme-toggle";
 import { useApp } from "@/lib/app-context";
-import { MOCK_TICKERS } from "@/lib/mock-data";
+import { getMacro } from "@/lib/api-client";
+import { NSE_TICKERS } from "@/lib/mock-data";
 
 interface NavbarProps {
   sidebarCollapsed: boolean;
@@ -18,17 +20,30 @@ export function Navbar({ sidebarCollapsed, onToggleSidebar }: NavbarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
 
-  // Mock market data (would come from API)
-  const vix = 14.2;
-  const fiiFlow = 3200;
-  const marketOpen = true;
+  // Live macro data for header badges — refresh every 5 min
+  const { data: macro } = useSWR("navbar-macro", getMacro, {
+    refreshInterval: 5 * 60 * 1000,
+    revalidateOnFocus: false,
+  });
 
-  const vixStatus = getVixStatus(vix);
+  const vix = macro?.vix ?? null;
+  const fiiFlow = macro?.fii_net_crore ?? null;
+  const vixStatus = getVixStatus(vix ?? 15);
+
+  // Market is open on weekdays 9:15–15:30 IST
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + istOffset);
+  const day = ist.getUTCDay();
+  const hour = ist.getUTCHours();
+  const min = ist.getUTCMinutes();
+  const timeMin = hour * 60 + min;
+  const marketOpen = day >= 1 && day <= 5 && timeMin >= 555 && timeMin <= 930;
 
   const filteredTickers = useMemo(() => {
-    if (!searchQuery.trim()) return MOCK_TICKERS.slice(0, 6);
+    if (!searchQuery.trim()) return NSE_TICKERS.slice(0, 6);
     const q = searchQuery.toLowerCase();
-    return MOCK_TICKERS.filter(
+    return NSE_TICKERS.filter(
       (t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)
     ).slice(0, 6);
   }, [searchQuery]);
@@ -87,8 +102,11 @@ export function Navbar({ sidebarCollapsed, onToggleSidebar }: NavbarProps) {
                       }}
                       className="w-full text-left px-4 py-3 hover:bg-surface-raised transition-colors duration-150 border-b border-border last:border-0"
                     >
-                      <div className="font-medium text-sm text-text-primary">{ticker.symbol}</div>
-                      <div className="text-xs text-text-muted">{ticker.name} • {ticker.sector}</div>
+                      <div className="font-medium text-sm text-text-primary">
+                        {ticker.symbol.replace(".NS", "")}
+                        <span className="ml-1 text-xs text-text-muted font-normal">.NS</span>
+                      </div>
+                      <div className="text-xs text-text-muted">{ticker.name} · {ticker.sector}</div>
                     </button>
                   ))
                 ) : (
@@ -102,21 +120,25 @@ export function Navbar({ sidebarCollapsed, onToggleSidebar }: NavbarProps) {
         {/* Right: Badges + Actions */}
         <div className="flex items-center gap-2">
           {/* VIX Badge */}
-          <Badge
-            variant={vix < 18 ? "bullish" : vix < 25 ? "warning" : "bearish"}
-            pulse={vix > 25}
-            className="hidden sm:inline-flex"
-          >
-            VIX {vix} {vixStatus.label}
-          </Badge>
+          {vix != null && (
+            <Badge
+              variant={vix < 18 ? "bullish" : vix < 25 ? "warning" : "bearish"}
+              pulse={vix > 25}
+              className="hidden sm:inline-flex"
+            >
+              VIX {vix.toFixed(1)} {vixStatus.label}
+            </Badge>
+          )}
 
           {/* FII Flow */}
-          <Badge
-            variant={fiiFlow >= 0 ? "bullish" : "bearish"}
-            className="hidden md:inline-flex"
-          >
-            FII {formatCrore(fiiFlow)}
-          </Badge>
+          {fiiFlow != null && (
+            <Badge
+              variant={fiiFlow >= 0 ? "bullish" : "bearish"}
+              className="hidden md:inline-flex"
+            >
+              FII {formatCrore(fiiFlow)}
+            </Badge>
+          )}
 
           {/* Market Status */}
           <Badge variant={marketOpen ? "bullish" : "muted"} className="hidden lg:inline-flex">

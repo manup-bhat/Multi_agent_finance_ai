@@ -25,3 +25,10 @@ export const NSE_TICKERS = [
   { symbol: "NTPC.NS", name: "NTPC Ltd", sector: "Power" },
   { symbol: "POWERGRID.NS", name: "Power Grid Corporation", sector: "Power" },
 ];
+
+// Alias with value/label shape for dropdown components
+export const TICKERS = NSE_TICKERS.map((t) => ({
+  value: t.symbol,
+  label: `${t.name} (${t.symbol.replace(".NS", "")})`,
+  sector: t.sector,
+}));
