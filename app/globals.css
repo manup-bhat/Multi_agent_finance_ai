@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode */
+    --background: 210 40% 98%;
+    --foreground: 222 84% 5%;
+    --surface: 0 0% 100%;
+    --surface-raised: 210 40% 95%;
+    --border: 214 32% 91%;
+    --text-primary: 222 84% 5%;
+    --text-secondary: 215 25% 37%;
+    --text-muted: 215 20% 65%;
+  }
+
+  .dark {
+    /* Dark mode */
+    --background: 225 50% 8%;
+    --foreground: 210 40% 95%;
+    --surface: 222 47% 11%;
+    --surface-raised: 215 33% 17%;
+    --border: 215 33% 17%;
+    --text-primary: 210 40% 95%;
+    --text-secondary: 215 20% 65%;
+    --text-muted: 215 25% 37%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Tabular numbers for financial data */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--surface-raised)) 25%,
+      hsl(var(--border)) 50%,
+      hsl(var(--surface-raised)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .card-base {
+    @apply bg-surface rounded-card border border-border shadow-card;
+  }
+
+  .section-label {
+    @apply text-xs font-medium uppercase tracking-widest text-text-muted;
+  }
+
+  .hero-number {
+    @apply text-4xl font-bold tabular-nums;
+  }
+}
