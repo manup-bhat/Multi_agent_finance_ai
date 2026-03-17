@@ -6,14 +6,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getMacro, getApiErrorMessage } from "@/lib/api-client";
 
-const CORRELATIONS = [
-  { factor: "USD/INR", corr: -0.72, impact: "Strong Negative" },
-  { factor: "Brent Crude", corr: -0.45, impact: "Moderate Negative" },
-  { factor: "US 10Y Yield", corr: -0.38, impact: "Moderate Negative" },
-  { factor: "Gold", corr: 0.12, impact: "Weak Positive" },
-  { factor: "SGX Nifty", corr: 0.88, impact: "Strong Positive" },
-];
-
 export default function MacroPage() {
   const { data: macro, error, isLoading } = useSWR(
     "macro-india",
@@ -197,39 +189,74 @@ export default function MacroPage() {
           </div>
         </div>
 
-        {/* Correlations — static reference data */}
+        {/* FII + Rupee card */}
         <div className="lg:col-span-2 card-base p-5">
           <div className="flex items-center gap-2 mb-4">
-            <h3 className="text-base font-semibold text-text-primary">Key Correlations (30-day)</h3>
+            <h3 className="text-base font-semibold text-text-primary">Currency & Flows</h3>
             <HelpPopover content={{
-              title: "Macro Correlations",
-              body: "Rolling 30-day Pearson correlation between Nifty50 returns and macro variables.",
-              affectsVerdict: "Strong correlations help the macro agent assess whether the current macro backdrop is a tailwind or headwind.",
-              source: "Computed from 30-day rolling returns — historical reference values",
+              title: "USD/INR & FII Flows",
+              body: "Rupee depreciation vs USD tightens liquidity and raises import costs for India. FII net flow is a direct proxy for institutional risk appetite.",
+              affectsVerdict: "USD/INR > 85 combined with FII selling is a macro headwind. The macro agent weighs these as a composite signal.",
+              source: "yfinance (USDINR=X) + NSE participant data — live",
             }} />
           </div>
-          <div className="space-y-3">
-            {CORRELATIONS.map((c) => (
-              <div key={c.factor}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm text-text-secondary font-medium">{c.factor}</span>
-                  <span className={cn("text-sm font-bold tabular-nums", c.corr > 0 ? "text-bullish-green" : "text-bearish-red")}>
-                    {c.corr > 0 ? "+" : ""}{c.corr.toFixed(2)}
-                  </span>
+          <div className="space-y-4">
+            {[
+              {
+                label: "USD/INR",
+                value: macro.usdinr != null ? `₹${macro.usdinr.toFixed(2)}` : "—",
+                sub: macro.usdinr != null
+                  ? macro.usdinr > 85 ? "Rupee Weak — Headwind"
+                  : macro.usdinr > 82 ? "Neutral"
+                  : "Rupee Strong — Tailwind"
+                  : "Unavailable",
+                positive: (macro.usdinr ?? 84) < 84,
+              },
+              {
+                label: "Brent Crude",
+                value: macro.brent_crude != null ? `$${macro.brent_crude.toFixed(1)} /bbl` : "—",
+                sub: macro.brent_crude != null
+                  ? macro.brent_crude > 90 ? "High — Inflation pressure"
+                  : macro.brent_crude > 75 ? "Moderate"
+                  : "Low — Input cost relief"
+                  : "Unavailable",
+                positive: (macro.brent_crude ?? 80) < 80,
+              },
+              {
+                label: "FII Net Flow",
+                value: macro.fii_net_crore != null
+                  ? `${macro.fii_net_crore >= 0 ? "+" : ""}₹${Math.abs(macro.fii_net_crore).toLocaleString("en-IN", { maximumFractionDigits: 0 })}Cr`
+                  : "—",
+                sub: macro.fii_trend,
+                positive: (macro.fii_net_crore ?? 0) >= 0,
+              },
+              {
+                label: "SGX Nifty Gap",
+                value: macro.sgx_nifty != null
+                  ? `${macro.sgx_nifty >= 0 ? "+" : ""}${macro.sgx_nifty.toFixed(0)} pts`
+                  : "—",
+                sub: macro.sgx_nifty != null
+                  ? macro.sgx_nifty > 100 ? "Strong positive open signal"
+                  : macro.sgx_nifty > 0 ? "Slightly positive"
+                  : macro.sgx_nifty > -100 ? "Slightly negative"
+                  : "Weak open signal"
+                  : "Unavailable",
+                positive: (macro.sgx_nifty ?? 0) >= 0,
+              },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center justify-between p-3 rounded-btn bg-surface-raised">
+                <div>
+                  <div className="text-xs text-text-muted font-medium">{item.label}</div>
+                  <div className="text-xs text-text-muted mt-0.5">{item.sub}</div>
                 </div>
-                <div className="relative h-2 bg-surface-raised rounded-pill overflow-hidden">
-                  <div
-                    className="absolute top-0 h-full rounded-pill"
-                    style={{
-                      width: `${Math.abs(c.corr) * 50}%`,
-                      left: c.corr >= 0 ? "50%" : undefined,
-                      right: c.corr < 0 ? "50%" : undefined,
-                      background: c.corr > 0 ? "#059669" : "#DC2626",
-                    }}
-                  />
-                  <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
+                <div className={cn(
+                  "text-base font-bold tabular-nums",
+                  item.value === "—" ? "text-text-muted"
+                    : item.positive ? "text-bullish-green"
+                    : "text-bearish-red"
+                )}>
+                  {item.value}
                 </div>
-                <div className="text-xs text-text-muted mt-0.5">{c.impact}</div>
               </div>
             ))}
           </div>

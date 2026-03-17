@@ -7,17 +7,17 @@ import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 
 const STAGES = [
-  { label: "Pre-flight", emoji: "🛫" },
-  { label: "Data Fetch", emoji: "📡" },
-  { label: "ML Models", emoji: "🧠" },
-  { label: "AI Agents", emoji: "🤖" },
-  { label: "Synthesis", emoji: "✅" },
+  { label: "Pre-flight" },
+  { label: "Data Fetch" },
+  { label: "ML Models" },
+  { label: "AI Agents" },
+  { label: "Synthesis" },
 ];
 
 export function AnalyzeCard() {
   const { selectedTicker, setAnalysisData, isAnalyzing, setIsAnalyzing, analysisStage, setAnalysisStage, horizon, setHorizon, includeFno, setIncludeFno, includeSentiment, setIncludeSentiment, addNotification } = useApp();
   const [progress, setProgress] = useState(0);
-  const [lastRun, setLastRun] = useState<Date | null>(new Date(Date.now() - 2 * 60000));
+  const [lastRun, setLastRun] = useState<Date | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(28);
 
   useEffect(() => {
@@ -157,9 +157,7 @@ export function AnalyzeCard() {
           </div>
           {/* Current stage */}
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>
-              {STAGES[analysisStage]?.emoji} {STAGES[analysisStage]?.label}...
-            </span>
+            <span>{STAGES[analysisStage]?.label}...</span>
             <span>~{timeRemaining}s remaining</span>
           </div>
         </div>
