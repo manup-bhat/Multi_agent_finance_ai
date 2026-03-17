@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import numpy as np, pandas as pd, datetime
 from ui_helpers import (
+    add_time_axis_marker,
     render_global_sidebar,
     safe_yf_download,
     flat_css,
@@ -95,7 +96,7 @@ if p10 is not None and p90 is not None:
     fig.add_trace(go.Scatter(x=idx_future, y=high_path, name="P90", line=dict(color="rgba(0,212,170,0.4)", width=1, dash="dot")))
     fig.add_trace(go.Scatter(x=idx_future, y=low_path, name="P10", fill="tonexty",
                               fillcolor="rgba(0,212,170,0.07)", line=dict(color="rgba(0,212,170,0.4)", width=1, dash="dot")))
-fig.add_vline(x=idx_hist[-1], line_color="#f59e0b", line_dash="dash", annotation_text="Today")
+add_time_axis_marker(fig, idx_hist[-1], text="Today", line_color="#f59e0b", line_dash="dash")
 fig.update_layout(template="plotly_dark",paper_bgcolor="#161922",plot_bgcolor="#161922",
                    height=360,margin=dict(l=0,r=0,t=30,b=0),legend=dict(bgcolor="#1c2130",bordercolor="#2d3554"),
                    title=dict(text=f"{ticker} · {horizon}-Day Fan Chart",font=dict(color="#e8eaf6")),

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 import structlog
 
@@ -22,7 +22,10 @@ from utils.ollama_client import filter_india_news
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
-settings = get_settings()
+
+
+def _settings():
+    return get_settings()
 
 _CACHE_LOCK = threading.Lock()
 _SENTIMENT_CACHE: dict[str, tuple[float, "SentimentResponse"]] = {}
@@ -67,10 +70,12 @@ def _cache_key(
     sources: Optional[List[str]],
     window_days: int,
     current_vix: float | None,
+    alpha_vantage_enabled: bool,
 ) -> str:
     source_key = ",".join(sorted(src.lower() for src in (sources or []))) or "*"
     vix_key = "none" if current_vix is None else f"{current_vix:.2f}"
-    return f"{ticker.upper()}|{source_key}|{window_days}|{vix_key}"
+    av_key = "av1" if alpha_vantage_enabled else "av0"
+    return f"{ticker.upper()}|{source_key}|{window_days}|{vix_key}|{av_key}"
 
 
 def _get_cached_response(key: str) -> SentimentResponse | None:
@@ -87,7 +92,7 @@ def _get_cached_response(key: str) -> SentimentResponse | None:
 
 
 def _set_cached_response(key: str, response: SentimentResponse) -> SentimentResponse:
-    ttl_seconds = settings.sentiment_cache_ttl_minutes * 60
+    ttl_seconds = _settings().sentiment_cache_ttl_minutes * 60
     with _CACHE_LOCK:
         _SENTIMENT_CACHE[key] = (time.monotonic() + ttl_seconds, response.model_copy(deep=True))
     return response
@@ -166,14 +171,28 @@ def _social_volume_baseline(ticker: str) -> float:
 
 
 def _resolve_high_social_volume(ticker: str, social_post_volume: int) -> bool:
+    cfg = _settings()
     baseline = _social_volume_baseline(ticker)
     if baseline <= 0:
-        return social_post_volume >= settings.social_volume_min_baseline * settings.social_volume_spike_multiple
+        return social_post_volume >= cfg.social_volume_min_baseline * cfg.social_volume_spike_multiple
     threshold = max(
-        float(settings.social_volume_min_baseline),
-        baseline * settings.social_volume_spike_multiple,
+        float(cfg.social_volume_min_baseline),
+        baseline * cfg.social_volume_spike_multiple,
     )
     return social_post_volume >= threshold
+
+
+def build_fallback_sentiment_response(ticker: str, detail: str) -> SentimentResponse:
+    return SentimentResponse(
+        ticker=ticker,
+        composite_score=0.0,
+        composite_label="NEUTRAL",
+        fear_greed_index=50.0,
+        fear_greed_label="NEUTRAL",
+        sentiment_window_days=resolve_sentiment_window_days(),
+        warnings=[f"LIVE_SENTIMENT_FALLBACK: {detail}"],
+        articles=[],
+    )
 
 
 async def build_live_sentiment_response(
@@ -183,7 +202,14 @@ async def build_live_sentiment_response(
 ) -> SentimentResponse:
     calendar_context = get_market_calendar_context()
     window_days = resolve_sentiment_window_days()
-    cache_key = _cache_key(ticker, sources, window_days, current_vix)
+    cfg = _settings()
+    cache_key = _cache_key(
+        ticker,
+        sources,
+        window_days,
+        current_vix,
+        alpha_vantage_enabled=bool(cfg.alpha_vantage_api_key),
+    )
     cached = _get_cached_response(cache_key)
     if cached is not None:
         return cached
@@ -215,7 +241,7 @@ async def build_live_sentiment_response(
         warnings.append(f"STOCKTWITS_FAILED: {results[1]}")
     if isinstance(results[2], Exception):
         warnings.append(f"MONEYCONTROL_FAILED: {results[2]}")
-    if not settings.alpha_vantage_api_key:
+    if not cfg.alpha_vantage_api_key:
         warnings.append("ALPHA_VANTAGE_API_KEY_NOT_CONFIGURED")
 
     news_articles = filter_india_news(news_articles)
@@ -318,4 +344,4 @@ async def analyze_sentiment(req: SentimentRequest) -> SentimentResponse:
         return await build_live_sentiment_response(req.ticker, req.sources)
     except Exception as exc:
         logger.error("api.sentiment.error", error=str(exc))
-        raise HTTPException(status_code=503, detail=f"Live sentiment unavailable: {exc}") from exc
+        return build_fallback_sentiment_response(req.ticker, str(exc))

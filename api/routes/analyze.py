@@ -14,7 +14,7 @@ import structlog
 from agents.risk_node import run_risk_node
 from agents.state import IndiaEngineState, validate_state_payload
 from api.routes.predict import build_live_prediction_from_frames
-from api.routes.sentiment import build_live_sentiment_response
+from api.routes.sentiment import build_fallback_sentiment_response, build_live_sentiment_response
 from api.schemas import AnalyzeRequest, AnalyzeResponse, PredictRequest
 from config.india_calendar import (
     classify_market_event,
@@ -185,7 +185,7 @@ async def _build_live_state(req: AnalyzeRequest) -> IndiaEngineState:
             sentiment = await sentiment_task
         except Exception as exc:
             logger.warning("api.analyze.sentiment_unavailable", ticker=req.ticker, error=str(exc))
-            sentiment = None
+            sentiment = build_fallback_sentiment_response(req.ticker, str(exc))
             sentiment_error = str(exc)
     else:
         sentiment = None

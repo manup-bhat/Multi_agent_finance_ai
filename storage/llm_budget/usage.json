@@ -1,0 +1,12 @@
+{
+  "date": "2026-03-17",
+  "groq_calls": 50,
+  "groq_prompt_tokens": 22309,
+  "groq_completion_tokens": 8816,
+  "groq_total_tokens": 31125,
+  "gemini_calls": 2,
+  "last_updated": "2026-03-17T15:18:39",
+  "last_groq_model": "llama-3.3-70b-versatile",
+  "last_groq_usage_estimated": false,
+  "last_gemini_model": "gemini-2.5-flash"
+}

@@ -130,13 +130,48 @@ def flat_css() -> None:
 [data-testid="stSidebar"]{background:linear-gradient(180deg,#0f1117,#161922);border-right:1px solid #2d3554;}
 [data-testid="stMetric"]{background:#161922;border:1px solid #2d3554;border-radius:12px;padding:1rem 1.25rem;}
 [data-testid="stMetricLabel"]{color:#8892b0!important;font-size:.78rem!important;text-transform:uppercase;letter-spacing:.08em;}
-[data-testid="stMetricValue"]{color:#e8eaf6!important;font-weight:700;}
+[data-testid="stMetricValue"]{color:#e8eaf6!important;font-weight:700;line-height:1.2!important;}
+[data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"],[data-testid="stMetricDeltaDescription"]{overflow:visible!important;}
+[data-testid="stMetricLabel"] *,[data-testid="stMetricValue"] *,[data-testid="stMetricDelta"] *,[data-testid="stMetricDeltaDescription"] *{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;word-break:break-word;}
 .stButton>button{background:linear-gradient(135deg,#00d4aa,#3b82f6);color:#0d0f14;font-weight:700;border:none;border-radius:8px;transition:opacity .2s;}
 .stButton>button:hover{opacity:.85;}
 .stDataFrame{border:1px solid #2d3554;border-radius:8px;}
 ::-webkit-scrollbar{width:5px;}
 ::-webkit-scrollbar-thumb{background:#2d3554;border-radius:3px;}
 </style>""", unsafe_allow_html=True)
+
+
+def add_time_axis_marker(
+    fig,
+    x,
+    text: str | None = None,
+    line_color: str = "#f59e0b",
+    line_dash: str = "dash",
+) -> None:
+    """Add a vertical marker on a datetime axis without Plotly's annotation_text path.
+
+    Plotly's add_vline(annotation_text=...) still trips a pandas 3.0 Timestamp
+    bug in shapeannotation for datetime axes, so we add the line shape directly
+    and attach a supported shape label instead.
+    """
+    shape_kwargs = {
+        "type": "line",
+        "x0": x,
+        "x1": x,
+        "xref": "x",
+        "y0": 0,
+        "y1": 1,
+        "yref": "paper",
+        "line": {"color": line_color, "dash": line_dash, "width": 1},
+    }
+    if text:
+        shape_kwargs["label"] = {
+            "text": text,
+            "textposition": "end",
+            "font": {"color": line_color, "size": 12},
+            "padding": 4,
+        }
+    fig.add_shape(**shape_kwargs)
 
 
 def render_page_header(icon: str, title: str, subtitle: str) -> None:

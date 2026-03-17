@@ -4,13 +4,16 @@ Call get_settings() everywhere. Never read os.environ directly.
 """
 from __future__ import annotations
 from functools import lru_cache
+from pathlib import Path
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8",
+        env_file=str(_ENV_FILE), env_file_encoding="utf-8",
         case_sensitive=False, extra="ignore",
     )
 
@@ -224,7 +227,19 @@ class Settings(BaseSettings):
         }
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=8)
+def _load_settings(env_mtime_ns: int) -> Settings:
+    env_file = str(_ENV_FILE) if _ENV_FILE.exists() else None
+    return Settings(_env_file=env_file)
+
+
 def get_settings() -> Settings:
-    """Singleton — call everywhere. Never instantiate Settings() directly."""
-    return Settings()
+    """
+    Singleton-like settings loader keyed by the repo .env mtime.
+
+    This keeps normal requests cheap, but picks up local .env edits without
+    requiring a Python interpreter restart for code paths that call
+    get_settings() at runtime.
+    """
+    env_mtime_ns = _ENV_FILE.stat().st_mtime_ns if _ENV_FILE.exists() else -1
+    return _load_settings(env_mtime_ns)

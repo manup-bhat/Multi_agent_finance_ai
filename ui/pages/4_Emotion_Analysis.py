@@ -44,8 +44,15 @@ def get_live_sentiment(tkr):
 
 live_data = get_live_sentiment(ticker)
 if not live_data:
-    st.warning("Live sentiment data unavailable for this ticker.")
-    st.stop()
+    live_data = {
+        "fear_greed_index": 50.0,
+        "composite_score": 0.0,
+        "composite_label": "NEUTRAL",
+        "warnings": ["Sentiment API unavailable. Showing a neutral fallback snapshot."],
+    }
+warnings = live_data.get("warnings") or []
+if warnings:
+    st.info(" | ".join(str(w) for w in warnings))
 fg_score  = live_data.get("fear_greed_index", 50.0)
 base_name = ticker.replace(".NS","").replace(".BO","")
 col_g, col_m = st.columns([1,2])

@@ -29,7 +29,9 @@ st.markdown("""
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{color:var(--green)!important;font-size:.72rem!important;letter-spacing:.12em;text-transform:uppercase;font-weight:600;}
 [data-testid="stMetric"]{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem 1.25rem;}
 [data-testid="stMetricLabel"]{color:var(--muted)!important;font-size:.78rem!important;text-transform:uppercase;letter-spacing:.08em;}
-[data-testid="stMetricValue"]{color:var(--text)!important;font-size:1.5rem!important;font-weight:700;}
+[data-testid="stMetricValue"]{color:var(--text)!important;font-size:1.5rem!important;font-weight:700;line-height:1.2!important;}
+[data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"],[data-testid="stMetricDeltaDescription"]{overflow:visible!important;}
+[data-testid="stMetricLabel"] *,[data-testid="stMetricValue"] *,[data-testid="stMetricDelta"] *,[data-testid="stMetricDeltaDescription"] *{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;word-break:break-word;}
 .stButton>button{background:linear-gradient(135deg,var(--green),var(--blue));color:#0d0f14;font-weight:700;border:none;border-radius:8px;padding:.45rem 1.25rem;transition:opacity .2s,transform .15s;}
 .stButton>button:hover{opacity:.85;transform:translateY(-1px);}
 .stTextInput>div>div{background:var(--card)!important;border:1px solid var(--border)!important;color:var(--text)!important;border-radius:8px;}

@@ -29,18 +29,16 @@ async def _preload_sentiment_models() -> None:
     ]
     get_composite_sentiment()
 
-    coroutines = [
-        engine._ensure_loaded()  # type: ignore[attr-defined]
-        for engine in engines
-        if hasattr(engine, "_ensure_loaded")
-    ]
-    results = await asyncio.gather(*coroutines, return_exceptions=True)
-    for engine, result in zip(engines, results):
-        if isinstance(result, Exception):
+    for engine in engines:
+        if not hasattr(engine, "_ensure_loaded"):
+            continue
+        try:
+            await engine._ensure_loaded()  # type: ignore[attr-defined]
+        except Exception as exc:
             logger.warning(
                 "api.runtime.sentiment_prewarm_failed",
                 engine=engine.__class__.__name__,
-                error=str(result),
+                error=str(exc),
             )
 
 

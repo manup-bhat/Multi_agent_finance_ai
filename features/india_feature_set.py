@@ -490,8 +490,24 @@ class IndiaFeatureSet:
             fii_dii_df.columns[1] if len(fii_dii_df.columns) > 1 else fii_dii_df.columns[0],
         )
 
-        fii = fii_dii_df[fii_col].reindex(df.index).ffill()
-        dii = fii_dii_df[dii_col].reindex(df.index).ffill()
+        price_index = pd.DatetimeIndex(df.index)
+        price_dates = (
+            price_index.tz_convert(MARKET_TZ).normalize()
+            if price_index.tz is not None else price_index.tz_localize(MARKET_TZ).normalize()
+        )
+
+        flow_df = fii_dii_df.copy()
+        flow_index = pd.DatetimeIndex(flow_df.index)
+        flow_df.index = (
+            flow_index.tz_convert(MARKET_TZ).normalize()
+            if flow_index.tz is not None else flow_index.tz_localize(MARKET_TZ).normalize()
+        )
+        flow_df = flow_df.groupby(level=0).last().sort_index()
+
+        fii_by_date = pd.to_numeric(flow_df[fii_col], errors="coerce").reindex(price_dates).ffill()
+        dii_by_date = pd.to_numeric(flow_df[dii_col], errors="coerce").reindex(price_dates).ffill()
+        fii = pd.Series(fii_by_date.to_numpy(), index=df.index, dtype=float)
+        dii = pd.Series(dii_by_date.to_numpy(), index=df.index, dtype=float)
 
         # Net flows — shift(1) for T-1 lag (published after close)
         out["fii_net_cr"] = fii.shift(1)

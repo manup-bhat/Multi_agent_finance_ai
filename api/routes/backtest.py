@@ -1,6 +1,8 @@
 """POST /backtest — run strategy backtest using Phase 9 engine."""
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, HTTPException
 import pandas as pd
 import structlog
@@ -28,6 +30,19 @@ def _extract_close(df: pd.DataFrame, label: str) -> pd.Series:
     if df is None or df.empty or "close" not in df.columns:
         raise ValueError(f"missing close series for {label}")
     return df["close"].copy()
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return default
+    return num if math.isfinite(num) else default
+
+
+def _normalize_percent(value: object) -> float:
+    num = _safe_float(value)
+    return num * 100.0 if abs(num) <= 2.0 else num
 
 
 @router.post("/backtest", response_model=BacktestResponse)
@@ -91,18 +106,30 @@ async def run_backtest(req: BacktestRequest):
         else:
             b_curve_list = []
 
+        win_rate_value = getattr(result, "win_rate_pct", None)
+        if win_rate_value is None:
+            metrics = getattr(result, "metrics", None)
+            win_rate_value = getattr(metrics, "win_rate_pct", None)
+            if win_rate_value is None and metrics is not None:
+                win_rate_value = getattr(metrics, "win_rate", 0.0)
+
+        sharpe_ratio = round(_safe_float(result.sharpe_ratio), 3)
+        cagr_pct = round(_normalize_percent(getattr(result, "cagr_pct", 0.0)), 2)
+        max_drawdown_pct = round(_normalize_percent(getattr(result, "max_drawdown_pct", 0.0)), 2)
+        win_rate_pct = round(_normalize_percent(win_rate_value), 2)
+
         return BacktestResponse(
             strategy=req.strategy,
             ticker=req.ticker,
-            sharpe_ratio=round(result.sharpe_ratio, 3),
-            cagr_pct=round(result.cagr_pct, 2),
-            max_drawdown_pct=round(result.max_drawdown_pct, 2),
-            win_rate_pct=round(result.metrics.win_rate_pct, 2),
+            sharpe_ratio=sharpe_ratio,
+            cagr_pct=cagr_pct,
+            max_drawdown_pct=max_drawdown_pct,
+            win_rate_pct=win_rate_pct,
             n_trades=result.n_trades,
-            blueprint_gate_passed=result.sharpe_ratio >= 0.8,
+            blueprint_gate_passed=sharpe_ratio >= 0.8,
             dates=dates_str,
-            equity_curve=result.equity_curve.tolist(),
-            benchmark_curve=b_curve_list,
+            equity_curve=[_safe_float(v) for v in result.equity_curve.tolist()],
+            benchmark_curve=[_safe_float(v) for v in b_curve_list],
         )
     except Exception as e:
         logger.error("api.backtest.error", error=str(e))

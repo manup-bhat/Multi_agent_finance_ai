@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 import pytest_asyncio
+from types import SimpleNamespace
 
 
 # ── FinBERT Primary Analyzer ─────────────────────────────────────────────────
@@ -389,6 +390,28 @@ class TestIndiaFearGreedIndex:
         # Fear < Greed direction is the key directional test
         assert check["fear_index"] < check["greed_index"]
 
+    @pytest.mark.asyncio
+    async def test_goemotions_runtime_failure_degrades_to_neutral(self, monkeypatch):
+        """GoEmotions runtime/device failures should not bubble out of Fear/Greed."""
+        from sentiment.fear_greed_index import get_fear_greed_index
+
+        index = get_fear_greed_index()
+
+        async def fake_compute_fear_greed_index(*args, **kwargs):
+            raise RuntimeError("Tensor on device meta is not on the expected device cpu!")
+
+        monkeypatch.setattr(index._goemotions, "compute_fear_greed_index", fake_compute_fear_greed_index)
+
+        result = await index.compute(
+            social_texts=["Reliance looks strong today."],
+            stocktwits_bullish=3,
+            stocktwits_bearish=1,
+            stocktwits_neutral=0,
+            gdelt_normalized_score=0.0,
+        )
+        assert result.goemotions_score == 50.0
+        assert 0.0 <= result.index <= 100.0
+
 
 # ── Composite Sentiment ───────────────────────────────────────────────────────
 
@@ -496,6 +519,44 @@ class TestCompositeSentimentEngine:
         )
         assert -1.0 <= result.score <= 1.0
         assert result.label is not None
+
+    @pytest.mark.asyncio
+    async def test_no_earnings_texts_path_does_not_require_asyncio_coroutine(self, monkeypatch):
+        """The optional earnings branch should work on modern asyncio without coroutine()."""
+        from sentiment.composite_sentiment import get_composite_sentiment
+        from sentiment.fear_greed_index import FearGreedResult
+
+        engine = get_composite_sentiment()
+
+        async def fake_finbert(_texts):
+            return SimpleNamespace(composite_score=0.2, results=[])
+
+        async def fake_fear_greed(**_kwargs):
+            return FearGreedResult(
+                index=55.0,
+                label="NEUTRAL",
+                contrarian_signal="NO_SIGNAL",
+                goemotions_score=50.0,
+                stocktwits_score=50.0,
+                gdelt_score_contribution=50.0,
+            )
+
+        async def fake_india_boost(texts, prosus_scores=None):
+            return SimpleNamespace(composite_score=0.2)
+
+        monkeypatch.setattr(engine._finbert, "analyze_texts", fake_finbert)
+        monkeypatch.setattr(engine._fear_greed, "compute", fake_fear_greed)
+        monkeypatch.setattr(engine._finbert_india, "analyze_with_india_boost", fake_india_boost)
+
+        result = await engine.analyze(
+            ticker="RELIANCE",
+            news_texts=["Reliance reported stable refining margins."],
+            social_texts=["Reliance looks steady."],
+            earnings_texts=[],
+            gdelt_normalized_score=0.0,
+        )
+        assert result is not None
+        assert result.earnings_tone == 0.0
 
     @pytest.mark.asyncio
     async def test_full_phase4_validation(self):

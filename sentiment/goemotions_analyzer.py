@@ -51,6 +51,8 @@ from typing import Optional
 
 import structlog
 
+from sentiment.hf_loader import get_transformers_pipeline
+
 logger = structlog.get_logger(__name__)
 
 MODEL_ID = "SamLowe/roberta-base-go_emotions"  # Most widely-used GoEmotions on HuggingFace
@@ -189,14 +191,15 @@ class GoEmotionsAnalyzer:
             return -1
 
     def _load_model_sync(self) -> None:
-        import transformers
         device_id = self._resolve_device()
+        hf_pipeline = get_transformers_pipeline()
+        self._pipeline = None
 
         for model_id in [MODEL_ID, MODEL_ID_FALLBACK]:
             try:
                 logger.info("goemotions.loading", model=model_id, device_id=device_id)
                 t0 = time.perf_counter()
-                self._pipeline = transformers.pipeline(
+                self._pipeline = hf_pipeline(
                     task="text-classification",
                     model=model_id,
                     tokenizer=model_id,
@@ -221,6 +224,12 @@ class GoEmotionsAnalyzer:
 
         logger.error("goemotions.all_models_failed")
         self._loaded = True  # Mark loaded to avoid retry loop
+
+    def _reset_and_force_cpu(self) -> None:
+        """Clear a bad pipeline state and force a CPU reload for the next attempt."""
+        self._pipeline = None
+        self._loaded = False
+        self._device = "cpu"
 
     async def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -293,10 +302,30 @@ class GoEmotionsAnalyzer:
 
         loop = asyncio.get_event_loop()
         all_raws: list[list[dict]] = []
-        for i in range(0, len(filtered), self.batch_size):
-            batch = filtered[i : i + self.batch_size]
-            raw = await loop.run_in_executor(None, self._run_batch_sync, batch)
-            all_raws.extend(raw)
+        for attempt in range(2):
+            try:
+                all_raws = []
+                for i in range(0, len(filtered), self.batch_size):
+                    batch = filtered[i : i + self.batch_size]
+                    raw = await loop.run_in_executor(None, self._run_batch_sync, batch)
+                    all_raws.extend(raw)
+                break
+            except Exception as exc:
+                is_meta_error = "device meta" in str(exc).lower()
+                if attempt == 0 and is_meta_error:
+                    logger.warning("goemotions.retry_cpu_after_meta_error", error=str(exc))
+                    self._reset_and_force_cpu()
+                    await self._ensure_loaded()
+                    continue
+
+                logger.error("goemotions.inference_failed", error=str(exc))
+                return IndiaFearGreedResult(
+                    index=50.0,
+                    label="NEUTRAL",
+                    contrarian_signal="NO_SIGNAL",
+                    total_texts=0,
+                    model_id=self._model_used,
+                )
 
         # Build per-text results
         results: list[GoEmotionsResult] = []

@@ -31,7 +31,10 @@ except Exception:  # pragma: no cover - optional dependency
     BeautifulSoup = None
 
 logger = structlog.get_logger(__name__)
-settings = get_settings()
+
+
+def _settings():
+    return get_settings()
 
 
 def _utc_now() -> datetime:
@@ -95,12 +98,12 @@ def _article_matches_ticker(article: dict, ticker: str) -> bool:
 
 class IndiaNewsScraperClient(BaseAdapter):
     def _rss_sources(self) -> dict[str, str]:
-        return settings.india_rss_feeds
+        return _settings().india_rss_feeds
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
     def _fetch_rss_sync(self, source: str, url: str, max_per_feed: int = 20) -> list[dict]:
         cache_key = self._cache_key("rss", source, url, max_per_feed)
-        ttl_seconds = settings.rss_cache_ttl_minutes * 60
+        ttl_seconds = _settings().rss_cache_ttl_minutes * 60
 
         def _load() -> list[dict]:
             feed = feedparser.parse(url)
@@ -141,7 +144,7 @@ class IndiaNewsScraperClient(BaseAdapter):
 
     async def get_yahoo_finance_rss(self, ticker: str, window_days: int = 3, max_articles: int = 10) -> list[dict]:
         symbol = ticker.upper().replace(".NS", "").replace(".BO", "")
-        url = settings.yahoo_finance_rss_url.format(ticker=f"{symbol}.NS")
+        url = _settings().yahoo_finance_rss_url.format(ticker=f"{symbol}.NS")
 
         def _load() -> list[dict]:
             feed = feedparser.parse(url)
@@ -161,7 +164,7 @@ class IndiaNewsScraperClient(BaseAdapter):
         cache_key = self._cache_key("yahoo_rss", symbol, window_days, max_articles)
         articles = self._cached(
             key=cache_key,
-            ttl_seconds=settings.rss_cache_ttl_minutes * 60,
+            ttl_seconds=_settings().rss_cache_ttl_minutes * 60,
             loader=_load,
         )
         return [article for article in articles if _within_window(article.get("published"), window_days)]
@@ -172,40 +175,78 @@ class IndiaNewsScraperClient(BaseAdapter):
         window_days: int = 3,
         max_articles: int = 10,
     ) -> list[dict]:
-        if not settings.alpha_vantage_api_key:
+        cfg = _settings()
+        if not cfg.alpha_vantage_api_key:
             return []
 
         symbol = ticker.upper().replace(".NS", "").replace(".BO", "")
-        cache_key = self._cache_key("alpha_vantage", symbol, window_days, max_articles)
+        query_candidates = [symbol]
+        if "." not in symbol:
+            query_candidates.append(f"{symbol}.BSE")
+        cache_key = self._cache_key("alpha_vantage_v2", symbol, ",".join(query_candidates), window_days, max_articles)
 
         def _load() -> list[dict]:
-            params = {
-                "function": "NEWS_SENTIMENT",
-                "tickers": f"{symbol}.NSE",
-                "apikey": settings.alpha_vantage_api_key,
-                "limit": max_articles,
-                "sort": "LATEST",
-            }
+            time_from = (_utc_now() - timedelta(days=max(1, window_days))).strftime("%Y%m%dT%H%M")
             with httpx.Client(timeout=15.0) as client:
-                response = client.get(settings.alpha_vantage_base_url, params=params)
-                response.raise_for_status()
-                payload = response.json()
-
-            items: list[dict] = []
-            for row in payload.get("feed", [])[:max_articles]:
-                items.append(
-                    {
-                        "source": "alpha_vantage",
-                        "title": row.get("title", ""),
-                        "summary": row.get("summary", ""),
-                        "url": row.get("url", ""),
-                        "published": row.get("time_published", ""),
-                        "sentiment_score": float(row.get("overall_sentiment_score", 0.0) or 0.0),
-                        "sentiment_label": row.get("overall_sentiment_label", "Neutral"),
-                        "relevance_score": float(row.get("relevance_score", 0.0) or 0.0),
+                for query_ticker in query_candidates:
+                    params = {
+                        "function": "NEWS_SENTIMENT",
+                        "tickers": query_ticker,
+                        "apikey": cfg.alpha_vantage_api_key,
+                        "limit": max_articles,
+                        "sort": "LATEST",
+                        "time_from": time_from,
                     }
-                )
-            return items
+                    response = client.get(cfg.alpha_vantage_base_url, params=params)
+                    response.raise_for_status()
+                    payload = response.json()
+
+                    api_message = (
+                        payload.get("Information")
+                        or payload.get("Note")
+                        or payload.get("Error Message")
+                    )
+                    if api_message:
+                        logger.warning(
+                            "alpha_vantage.api_message",
+                            ticker=symbol,
+                            query_ticker=query_ticker,
+                            message=str(api_message),
+                        )
+                        continue
+
+                    items: list[dict] = []
+                    for row in payload.get("feed", [])[:max_articles]:
+                        ticker_sentiment = row.get("ticker_sentiment") or []
+                        relevance_score = float(row.get("relevance_score", 0.0) or 0.0)
+                        for sentiment_row in ticker_sentiment:
+                            candidate = str(sentiment_row.get("ticker", "")).upper()
+                            if candidate in {symbol, query_ticker.upper(), f"{symbol}.BSE"}:
+                                relevance_score = float(
+                                    sentiment_row.get("relevance_score", relevance_score) or relevance_score
+                                )
+                                break
+                        items.append(
+                            {
+                                "source": "alpha_vantage",
+                                "title": row.get("title", ""),
+                                "summary": row.get("summary", ""),
+                                "url": row.get("url", ""),
+                                "published": row.get("time_published", ""),
+                                "sentiment_score": float(row.get("overall_sentiment_score", 0.0) or 0.0),
+                                "sentiment_label": row.get("overall_sentiment_label", "Neutral"),
+                                "relevance_score": relevance_score,
+                            }
+                        )
+                    if items:
+                        logger.info(
+                            "alpha_vantage.fetched",
+                            ticker=symbol,
+                            query_ticker=query_ticker,
+                            count=len(items),
+                        )
+                        return items
+            return []
 
         try:
             items = self._cached(
@@ -232,10 +273,10 @@ class IndiaNewsScraperClient(BaseAdapter):
         cache_key = self._cache_key("moneycontrol", symbol, window_days, max_items)
 
         def _load() -> list[dict]:
-            url = settings.moneycontrol_news_url
+            url = _settings().moneycontrol_news_url
             with httpx.Client(
                 timeout=20.0,
-                headers={"User-Agent": settings.nse_user_agent},
+                headers={"User-Agent": _settings().nse_user_agent},
                 follow_redirects=True,
             ) as client:
                 response = client.get(url)
@@ -282,13 +323,13 @@ class IndiaNewsScraperClient(BaseAdapter):
                     if len(items) >= max_items:
                         break
 
-            time.sleep(settings.moneycontrol_scrape_delay)
+            time.sleep(_settings().moneycontrol_scrape_delay)
             return items[:max_items]
 
         try:
             items = self._cached(
                 key=cache_key,
-                ttl_seconds=settings.rss_cache_ttl_minutes * 60,
+                ttl_seconds=_settings().rss_cache_ttl_minutes * 60,
                 loader=_load,
             )
         except Exception as exc:
@@ -349,7 +390,8 @@ class StockTwitsClient:
 
     async def get_symbol_messages(self, nse_symbol: str, max_messages: int = 30) -> list[dict]:
         st_sym = f"{nse_symbol.upper().replace('.NS', '').replace('.BO', '')}.IN"
-        url = f"{settings.stocktwits_base_url}/{st_sym}.json"
+        cfg = _settings()
+        url = f"{cfg.stocktwits_base_url}/{st_sym}.json"
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url)
@@ -369,11 +411,14 @@ class StockTwitsClient:
                     }
                 )
             logger.info("stocktwits.fetched", symbol=st_sym, count=len(messages))
-            await asyncio.sleep(settings.stocktwits_rate_limit_delay)
+            await asyncio.sleep(cfg.stocktwits_rate_limit_delay)
             return messages
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 logger.warning("stocktwits.not_found", symbol=st_sym)
+                return []
+            if exc.response.status_code == 403:
+                logger.info("stocktwits.forbidden", symbol=st_sym)
                 return []
             logger.warning("stocktwits.status_error", symbol=st_sym, error=str(exc))
             return []

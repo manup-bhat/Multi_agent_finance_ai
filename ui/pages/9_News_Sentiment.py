@@ -44,11 +44,19 @@ def fetch_sentiment(ticker_str):
 with st.spinner("Fetching live sentiment from FinBERT & Scraping News..."):
     res = fetch_sentiment(ticker)
 
-if not res or not res.get("articles"):
-    st.warning("No news or sentiment data available. The sentiment API might be offline.")
+if not res:
+    st.warning("Sentiment API unavailable right now. Showing an empty fallback state.")
+    res = {"composite_score": 0.0, "composite_label": "NEUTRAL", "articles": [], "warnings": ["Sentiment API request failed."]}
+
+warnings = res.get("warnings") or []
+if warnings:
+    st.info(" | ".join(str(w) for w in warnings))
+
+if not res.get("articles"):
+    st.info("No recent articles matched this ticker in the active sentiment window.")
     df_news = pd.DataFrame(columns=["source", "headline", "sentiment", "label", "date"])
-    avg = 0.0
-    lbl = "NEUTRAL"
+    avg = float(res.get("composite_score", 0.0))
+    lbl = res.get("composite_label", "NEUTRAL")
 else:
     news = res["articles"]
     df_news  = pd.DataFrame(news)

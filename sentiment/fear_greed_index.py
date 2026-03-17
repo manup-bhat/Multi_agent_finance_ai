@@ -186,9 +186,18 @@ class IndiaFearGreedIndex:
             FearGreedResult with final index (0-100) and signals
         """
         # ── 1. GoEmotions on social text ────────────────────────────────────
-        go_result: IndiaFearGreedResult = await self._goemotions.compute_fear_greed_index(
-            texts=social_texts,
-        )
+        try:
+            go_result: IndiaFearGreedResult = await self._goemotions.compute_fear_greed_index(
+                texts=social_texts,
+            )
+        except Exception as exc:
+            logger.error("fear_greed.goemotions_failed", error=str(exc))
+            go_result = IndiaFearGreedResult(
+                index=50.0,
+                label="NEUTRAL",
+                contrarian_signal="NO_SIGNAL",
+                total_texts=0,
+            )
         go_score = go_result.index  # already in [0, 100]
 
         # ── 2. StockTwits native labels ──────────────────────────────────────

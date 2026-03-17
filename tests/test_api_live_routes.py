@@ -62,6 +62,22 @@ def _fii_df(rows: int = 40) -> pd.DataFrame:
     )
 
 
+def _timed_price_df(rows: int = 320, ticker: str = "HDFCBANK.NS") -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01 15:30", periods=rows, freq="B", tz="Asia/Kolkata")
+    close = pd.Series(range(rows), index=idx, dtype=float) + 1500.0
+    return pd.DataFrame(
+        {
+            "open": close * 0.998,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": 1_000_000.0,
+            "ticker": ticker,
+        },
+        index=idx,
+    )
+
+
 def _option_chain() -> pd.DataFrame:
     rows = []
     for strike in [21500, 21600, 21700]:
@@ -98,6 +114,137 @@ def _backtest_result() -> SimpleNamespace:
         n_trades=6,
         equity_curve=equity,
     )
+
+
+def test_fii_features_align_on_trade_date_not_exact_timestamp():
+    from features.india_feature_set import IndiaFeatureSet
+
+    feature_builder = IndiaFeatureSet()
+    features = feature_builder._compute_fii_dii_features(
+        df=_timed_price_df(rows=40, ticker="RELIANCE.NS"),
+        fii_dii_df=_fii_df(rows=40),
+    )
+
+    fii_cols = [
+        "fii_net_cr",
+        "dii_net_cr",
+        "fii_zscore_5d",
+        "dii_zscore_5d",
+        "fii_streak",
+        "fii_dii_consensus",
+    ]
+    assert not features[fii_cols].isna().all().any()
+
+
+@pytest.mark.asyncio
+async def test_alpha_vantage_news_uses_runtime_settings_and_supported_symbol(monkeypatch):
+    from data.adapters.india_news_scraper import IndiaNewsScraperClient
+
+    requested_params: list[dict] = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "feed": [
+                    {
+                        "title": "Reliance Industries gains after strong retail update",
+                        "summary": "Reliance Industries shares moved higher in Mumbai trade.",
+                        "url": "https://example.com/reliance",
+                        "time_published": "2026-03-17T10:00:00Z",
+                        "overall_sentiment_score": "0.35",
+                        "overall_sentiment_label": "Bullish",
+                        "ticker_sentiment": [
+                            {"ticker": "RELIANCE", "relevance_score": "0.91"},
+                        ],
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout=15.0):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, params=None):
+            requested_params.append(dict(params or {}))
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "data.adapters.india_news_scraper.get_settings",
+        lambda: SimpleNamespace(
+            alpha_vantage_api_key="test-alpha-key",
+            alpha_vantage_base_url="https://example.com/query",
+            rss_cache_ttl_minutes=30,
+        ),
+    )
+    monkeypatch.setattr("data.adapters.india_news_scraper.httpx.Client", FakeClient)
+    IndiaNewsScraperClient._cache.clear()
+
+    items = await IndiaNewsScraperClient().get_alpha_vantage_news_sentiment(
+        "RELIANCE.NS",
+        window_days=3,
+        max_articles=5,
+    )
+
+    assert requested_params
+    assert requested_params[0]["tickers"] == "RELIANCE"
+    assert requested_params[0]["apikey"] == "test-alpha-key"
+    assert items
+    assert items[0]["relevance_score"] == 0.91
+
+
+@pytest.mark.asyncio
+async def test_sentiment_route_cache_tracks_alpha_key_state(monkeypatch):
+    import api.routes.sentiment as sentiment_route
+
+    state = {"alpha_key": ""}
+
+    async def fake_ticker_news(self, ticker, max_articles=10, window_days=3, include_extras=True):
+        return []
+
+    async def fake_symbol_messages(self, ticker, max_messages=30):
+        return []
+
+    async def fake_moneycontrol(self, ticker, window_days=3, max_items=20):
+        return []
+
+    monkeypatch.setattr(
+        "api.routes.sentiment.get_settings",
+        lambda: SimpleNamespace(
+            alpha_vantage_api_key=state["alpha_key"],
+            sentiment_cache_ttl_minutes=120,
+            social_volume_min_baseline=5,
+            social_volume_spike_multiple=3.0,
+        ),
+    )
+    monkeypatch.setattr(
+        "data.adapters.india_news_scraper.IndiaNewsScraperClient.get_ticker_news",
+        fake_ticker_news,
+    )
+    monkeypatch.setattr(
+        "data.adapters.india_news_scraper.StockTwitsClient.get_symbol_messages",
+        fake_symbol_messages,
+    )
+    monkeypatch.setattr(
+        "data.adapters.india_news_scraper.IndiaNewsScraperClient.get_moneycontrol_comments",
+        fake_moneycontrol,
+    )
+    sentiment_route._SENTIMENT_CACHE.clear()
+
+    first = await sentiment_route.build_live_sentiment_response("RELIANCE.NS", current_vix=15.0)
+    assert "ALPHA_VANTAGE_API_KEY_NOT_CONFIGURED" in first.warnings
+
+    state["alpha_key"] = "configured"
+    second = await sentiment_route.build_live_sentiment_response("RELIANCE.NS", current_vix=15.0)
+    assert "ALPHA_VANTAGE_API_KEY_NOT_CONFIGURED" not in second.warnings
 
 
 @pytest.mark.asyncio
@@ -220,6 +367,53 @@ async def test_sentiment_route_shape(monkeypatch):
     assert result.composite_label == "BULLISH"
     assert result.social_bullish_pct == 68.0
     assert len(result.articles) == 1
+
+
+@pytest.mark.asyncio
+async def test_analyze_route_uses_sentiment_fallback_when_builder_fails(monkeypatch):
+    async def fake_get_ohlcv(self, ticker, period="1y", interval="1d"):
+        return _price_df(ticker=ticker)
+
+    async def fake_macro_snapshot(self, period="1y"):
+        return _macro_df()
+
+    async def fake_vix(self, period="6mo"):
+        return _vix_df()
+
+    async def fake_fii(self, days=90):
+        return _fii_df()
+
+    async def fake_prediction_response(req, **kwargs):
+        from api.schemas import PredictResponse
+        return PredictResponse(
+            ticker=req.ticker,
+            horizon=req.horizon,
+            direction="BULLISH",
+            direction_prob=0.7,
+            class_probs={"Bullish": 0.7},
+            p10=1500.0,
+            p50=1520.0,
+            p90=1545.0,
+            confidence=0.72,
+            regime="BULL",
+            model_used="statistical_live_fallback",
+        )
+
+    async def fake_sentiment_response(*args, **kwargs):
+        raise AttributeError("module 'asyncio' has no attribute 'coroutine'")
+
+    monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_ohlcv", fake_get_ohlcv)
+    monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_macro_snapshot", fake_macro_snapshot)
+    monkeypatch.setattr("data.adapters.yfinance_client.YFinanceClient.get_india_vix", fake_vix)
+    monkeypatch.setattr("data.adapters.nselib_client.NSELibClient.get_fii_dii", fake_fii)
+    monkeypatch.setattr("api.routes.analyze.build_live_prediction_from_frames", fake_prediction_response)
+    monkeypatch.setattr("api.routes.analyze.build_live_sentiment_response", fake_sentiment_response)
+    monkeypatch.setattr("agents.graph.workflow.get_workflow", lambda: (_ for _ in ()).throw(RuntimeError("skip llm")))
+
+    result = await analyze(AnalyzeRequest(ticker="TCS.NS", horizon=5, include_fno=False))
+    assert result.ticker == "TCS.NS"
+    assert result.fear_greed_index == 50.0
+    assert any("SENTIMENT_UNAVAILABLE" in err for err in result.errors)
 
 
 @pytest.mark.asyncio

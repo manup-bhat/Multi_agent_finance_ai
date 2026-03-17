@@ -79,6 +79,11 @@ from config.constants import (
 )
 
 
+async def _async_none() -> None:
+    """Compatibility helper for optional concurrent branches."""
+    return None
+
+
 # ── Output types ──────────────────────────────────────────────────────────────
 
 def _score_to_label(score: float) -> str:
@@ -320,7 +325,7 @@ class CompositeSentimentEngine:
         task_earnings = asyncio.create_task(
             self._finbert_tone.analyze_earnings_texts(earnings_texts)
             if earnings_texts
-            else asyncio.coroutine(lambda: None)()
+            else _async_none()
         )
 
         # GDELT fetch (if needed) — also parallel

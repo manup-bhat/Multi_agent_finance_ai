@@ -31,11 +31,12 @@ from typing import Optional
 
 import structlog
 
+from sentiment.hf_loader import get_transformers_pipeline
+
 logger = structlog.get_logger(__name__)
 
 # Lazy import — only pulled in when model is first used
 _torch = None
-_transformers = None
 
 LABEL_TO_SCORE: dict[str, float] = {
     "positive": 1.0,
@@ -112,21 +113,19 @@ class FinBERTAnalyzer:
 
     def _load_model_sync(self) -> None:
         """Synchronous model load — called in executor to avoid blocking event loop."""
-        global _torch, _transformers
+        global _torch
         if _torch is None:
             import torch as _torch_mod
             _torch = _torch_mod
-        if _transformers is None:
-            import transformers as _transformers_mod
-            _transformers = _transformers_mod
 
         device = self._resolve_device()
         device_id = 0 if device == "cuda" else -1
+        hf_pipeline = get_transformers_pipeline()
 
         logger.info("finbert.loading", model=MODEL_ID, device=device)
         t0 = time.perf_counter()
 
-        self._pipeline = _transformers.pipeline(
+        self._pipeline = hf_pipeline(
             task="text-classification",
             model=MODEL_ID,
             tokenizer=MODEL_ID,

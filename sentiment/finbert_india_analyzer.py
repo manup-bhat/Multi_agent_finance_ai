@@ -41,6 +41,8 @@ from typing import Optional
 
 import structlog
 
+from sentiment.hf_loader import get_transformers_pipeline
+
 logger = structlog.get_logger(__name__)
 
 MODEL_ID = "Vansh180/FinBERT-India-v1"
@@ -158,15 +160,14 @@ class FinBERTIndiaAnalyzer:
 
     def _load_model_sync(self) -> None:
         """Attempt to load FinBERT-India-v1; fall back to ProsusAI if needed."""
-        import transformers
-
         device_id = self._resolve_device()
+        hf_pipeline = get_transformers_pipeline()
 
         for model_id in [MODEL_ID, FALLBACK_MODEL_ID]:
             try:
                 logger.info("finbert_india.loading", model=model_id, device_id=device_id)
                 t0 = time.perf_counter()
-                self._pipeline = transformers.pipeline(
+                self._pipeline = hf_pipeline(
                     task="text-classification",
                     model=model_id,
                     tokenizer=model_id,
