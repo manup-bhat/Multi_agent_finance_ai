@@ -24,15 +24,20 @@ export function SectorRotationChart({ ticker }: SectorRotationChartProps) {
       setLoading(true);
       setError(null);
       try {
-        // Mock: Generate sector rotation data
-        const mockData = SECTORS.map((sector) => ({
-          x: (Math.random() - 0.5) * 10,
-          y: (Math.random() - 0.5) * 10,
-          z: Math.random() * 200 + 100,
-          label: sector.substring(0, 2),
+        const resp = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/macro/india-cues`
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        const sectorRS = json.sector_rotation || json.sector_rs || {};
+        const sectorData = Object.entries(sectorRS).map(([sector, d]: [string, any]) => ({
+          x: +(d.relative_strength ?? d.rs ?? 0).toFixed(2),
+          y: +(d.momentum ?? d.rs_momentum ?? 0).toFixed(2),
+          z: Math.abs(d.flow ?? d.volume_ratio ?? 1) * 100 + 100,
+          label: sector.substring(0, 2).toUpperCase(),
         }));
-
-        setData(mockData);
+        if (!sectorData.length) throw new Error('No sector rotation data');
+        setData(sectorData);
       } catch (e: any) {
         setError(e.message);
       } finally {

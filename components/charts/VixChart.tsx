@@ -29,19 +29,14 @@ export function VixChart({ variant = 'full', height = 280 }: VixChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate VIX data (in production, this comes from API)
-        const mockDates = Array.from({ length: 60 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (59 - i));
-          return d.toISOString().split('T')[0];
+        const vixHistory: { date: string; vix: number }[] = json.vix_history || json.india_vix_history || [];
+        if (!vixHistory.length) throw new Error('No VIX history data');
+        const vixValues = vixHistory.map((v) => v.vix);
+        setData({
+          dates: vixHistory.map((v) => v.date),
+          vix: vixValues,
+          current: vixValues[vixValues.length - 1],
         });
-
-        const mockVIX = Array.from({ length: 60 }, (_, i) => {
-          const trend = 0.1 * (i - 30);
-          return Math.max(10, Math.min(40, 18 + trend + (Math.random() - 0.5) * 4));
-        });
-
-        setData({ dates: mockDates, vix: mockVIX, current: mockVIX[59] });
       } catch (e: any) {
         setError(e.message);
       } finally {

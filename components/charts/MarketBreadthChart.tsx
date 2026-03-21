@@ -38,26 +38,23 @@ export function MarketBreadthChart({ ticker }: MarketBreadthChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate breadth data (in production, this comes from API)
-        const mockDates = Array.from({ length: 30 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (29 - i));
-          return d.toISOString().split('T')[0];
-        });
-
+        const breadth = json.market_breadth || json.breadth || {};
+        const breadthHistory: { date: string; nifty: number; above_20dma: number; above_50dma: number; above_200dma: number }[] =
+          breadth.history || json.breadth_history || [];
+        if (!breadthHistory.length) throw new Error('No market breadth data');
         const mockBreadth = {
-          dates: mockDates,
-          niftyPrices: Array.from({ length: 30 }, () => 23000 + Math.random() * 1000),
-          above20DMA: Array.from({ length: 30 }, () => 40 + Math.random() * 50),
-          above50DMA: Array.from({ length: 30 }, () => 30 + Math.random() * 50),
-          above200DMA: Array.from({ length: 30 }, () => 20 + Math.random() * 50),
+          dates: breadthHistory.map((b) => b.date),
+          niftyPrices: breadthHistory.map((b) => b.nifty),
+          above20DMA: breadthHistory.map((b) => b.above_20dma),
+          above50DMA: breadthHistory.map((b) => b.above_50dma),
+          above200DMA: breadthHistory.map((b) => b.above_200dma),
         };
-
+        const last = breadthHistory[breadthHistory.length - 1];
         setData(mockBreadth);
         setLatestReadings({
-          above20: mockBreadth.above20DMA[29],
-          above50: mockBreadth.above50DMA[29],
-          above200: mockBreadth.above200DMA[29],
+          above20: last.above_20dma,
+          above50: last.above_50dma,
+          above200: last.above_200dma,
         });
       } catch (e: any) {
         setError(e.message);

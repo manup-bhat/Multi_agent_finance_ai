@@ -39,17 +39,13 @@ export function FiiDiiChart({ days = 30 }: FiiDiiChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate FII/DII data (in production, this comes from API)
-        const mockDates = Array.from({ length: selectedDays }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (selectedDays - 1 - i));
-          return d.toISOString().split('T')[0];
+        const flows: { date: string; fii: number; dii: number }[] = json.flows || json.data || [];
+        if (!flows.length) throw new Error('No flow data returned');
+        setData({
+          dates: flows.map((f) => f.date),
+          fii: flows.map((f) => f.fii),
+          dii: flows.map((f) => f.dii),
         });
-
-        const mockFII = Array.from({ length: selectedDays }, () => (Math.random() - 0.5) * 20000);
-        const mockDII = Array.from({ length: selectedDays }, () => (Math.random() - 0.5) * 15000);
-
-        setData({ dates: mockDates, fii: mockFII, dii: mockDII });
       } catch (e: any) {
         setError(e.message);
       } finally {

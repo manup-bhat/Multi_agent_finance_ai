@@ -59,3 +59,19 @@ export type { CandlestickChartProps } from './CandlestickChart';
 
 // Skeleton for loading states
 export { ChartSkeleton } from './chart-skeleton';
+
+// New Chart 14-16, 19, Pivot Table
+export { CompositeSentimentBar } from './CompositeSentimentBar';
+export type { CompositeSentimentBarProps } from './CompositeSentimentBar';
+
+export { SentimentPieChart } from './SentimentPieChart';
+export type { SentimentPieChartProps } from './SentimentPieChart';
+
+export { ErrorHistogram } from './ErrorHistogram';
+export type { ErrorHistogramProps } from './ErrorHistogram';
+
+export { MacroAreaChart } from './MacroAreaChart';
+export type { MacroAreaChartProps } from './MacroAreaChart';
+
+export { PivotTable } from './PivotTable';
+export type { PivotTableProps } from './PivotTable';

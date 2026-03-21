@@ -32,13 +32,18 @@ export function SectorRSHeatmap({ ticker }: SectorRSHeatmapProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate sector RS data (in production, this comes from API)
-        const mockData = RS_PERIODS.map((period) => ({
-          name: period,
-          data: SECTORS.map(() => Math.random() * 20 - 10),
-        }));
-
-        setData(mockData);
+        const sectorRS = json.sector_rs || json.sector_performance || {};
+        // API returns: { sector_name: { rs_6m, rs_3m, rs_1m, rs_1w, rs_5d } }
+        const sectors = Object.keys(sectorRS).length ? Object.keys(sectorRS) : SECTORS;
+        const realData = RS_PERIODS.map((period, idx) => {
+          const key = ['rs_6m', 'rs_3m', 'rs_1m', 'rs_1w', 'rs_5d'][idx];
+          return {
+            name: period,
+            data: sectors.map((s) => sectorRS[s]?.[key] ?? sectorRS[s] ?? 0),
+          };
+        });
+        setData(realData.length ? realData : null);
+        if (!realData.length) throw new Error('No sector RS data in response');
       } catch (e: any) {
         setError(e.message);
       } finally {

@@ -36,20 +36,11 @@ export function PcrHistoryChart({ ticker }: PcrHistoryChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate PCR history (in production, this comes from API)
-        const mockDates = Array.from({ length: 30 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (29 - i));
-          return d.toISOString().split('T')[0];
-        });
-
-        const mockPCR = Array.from({ length: 30 }, (_, i) => {
-          const trend = 0.05 * (i - 15);
-          return Math.max(0.5, Math.min(2.0, 1.32 + trend + (Math.random() - 0.5) * 0.3));
-        });
-
-        setData({ dates: mockDates, pcr: mockPCR });
-        setCurrentPCR(mockPCR[29]);
+        const pcrHistory: { date: string; pcr: number }[] = json.pcr_history || json.pcr_data || [];
+        if (!pcrHistory.length) throw new Error('No PCR history data');
+        const pcrs = pcrHistory.map((p) => p.pcr);
+        setData({ dates: pcrHistory.map((p) => p.date), pcr: pcrs });
+        setCurrentPCR(pcrs[pcrs.length - 1] ?? 1.0);
       } catch (e: any) {
         setError(e.message);
       } finally {

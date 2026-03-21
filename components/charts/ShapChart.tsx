@@ -23,18 +23,27 @@ export function ShapChart({ ticker = 'NIFTY' }: ShapChartProps) {
       setLoading(true);
       setError(null);
       try {
-        // Mock: Generate SHAP feature importance
-        const features = ['RSI(14)', 'EMA_20/50 Ratio', 'MACD Hist', 'Volume Momentum', 'VIX Level', 'FII Flow', 'PCR Ratio', 'ATR %'];
-        const importance = [0.28, 0.22, 0.15, 0.12, 0.10, -0.08, 0.07, 0.06];
-
-        setData({ features, importance });
+        const resp = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/predict`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: ticker || 'NIFTY', horizon: 5 }),
+          }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        const shapRaw: { feature: string; value: number }[] = json.shap_values || [];
+        if (!shapRaw.length) throw new Error('No SHAP values in response');
+        // Sort by |value| descending, take top 8
+        const sorted = [...shapRaw].sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 8);
+        setData({ features: sorted.map((s) => s.feature), importance: sorted.map((s) => s.value) });
       } catch (e: any) {
         setError(e.message);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [ticker]);
 

@@ -33,16 +33,15 @@ export function IvSmileChart({ ticker = 'NIFTY' }: IvSmileChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate IV smile (in production, this comes from API)
-        const strikes = Array.from({ length: 11 }, (_, i) => 23000 + (i - 5) * 500);
-        const atmStrike = 23000;
-        const currentIV = Array.from({ length: 11 }, (_, i) => {
-          const distance = Math.abs(strikes[i] - atmStrike) / atmStrike;
-          return 18 + distance * distance * 100;
+        const fnoReport = json.fno_report || json.iv_smile || {};
+        const smileData: { strike: number; current_iv: number; avg_iv: number }[] = fnoReport.iv_smile || [];
+        if (!smileData.length) throw new Error('No IV smile data from API');
+        setData({
+          strikes: smileData.map((s) => s.strike),
+          currentIV: smileData.map((s) => s.current_iv),
+          avgIV: smileData.map((s) => s.avg_iv),
+          atmStrike: fnoReport.atm_strike ?? smileData[Math.floor(smileData.length / 2)].strike,
         });
-        const avgIV = Array.from({ length: 11 }, () => 16 + Math.random() * 4);
-
-        setData({ strikes, currentIV, avgIV, atmStrike });
       } catch (e: any) {
         setError(e.message);
       } finally {

@@ -36,20 +36,16 @@ export function FanChart({ ticker, horizon = 5 }: FanChartProps) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
 
-        // Mock: Generate forecast data (in production, this comes from API)
-        const today = new Date();
-        const dates = Array.from({ length: horizon }, (_, i) => {
-          const d = new Date(today);
-          d.setDate(d.getDate() + i);
-          return d.toISOString().split('T')[0];
+        const forecast: { date: string; p10: number; p50: number; p90: number }[] =
+          json.forecast || json.fan || [];
+        if (!forecast.length) throw new Error('No forecast data in response');
+        setData({
+          dates: forecast.map((f) => f.date),
+          p10: forecast.map((f) => f.p10),
+          p50: forecast.map((f) => f.p50),
+          p90: forecast.map((f) => f.p90),
+          current: forecast[0]?.p50 ?? 0,
         });
-
-        const p50Base = 23500;
-        const p50 = Array.from({ length: horizon }, (_, i) => p50Base + (i * 50 + Math.random() * 100 - 50));
-        const p10 = p50.map((v) => v - 800 - Math.random() * 400);
-        const p90 = p50.map((v) => v + 800 + Math.random() * 400);
-
-        setData({ dates, p10, p50, p90, current: p50Base });
       } catch (e: any) {
         setError(e.message);
       } finally {
