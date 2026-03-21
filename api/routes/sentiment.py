@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Optional
 
+import feedparser
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 import structlog
@@ -22,6 +23,37 @@ from utils.ollama_client import filter_india_news
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+def _fetch_google_finance_rss(ticker: str, max_articles: int = 10) -> list[dict]:
+    """Fallback: Google Finance RSS for a ticker. No API key required."""
+    clean = ticker.upper().replace(".NS", "").replace(".BO", "")
+    urls = [
+        f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={clean}.NS&region=IN&lang=en-IN",
+        f"https://news.google.com/rss/search?q={clean}+NSE+stock+India&hl=en-IN&gl=IN&ceid=IN:en",
+    ]
+    articles: list[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+    for url in urls:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:max_articles]:
+                title = entry.get("title", "")
+                summary = entry.get("summary", entry.get("description", ""))
+                if title or summary:
+                    articles.append({
+                        "source": "google_finance_rss",
+                        "title": title,
+                        "summary": summary,
+                        "url": entry.get("link", ""),
+                        "published": entry.get("published", now),
+                    })
+            if articles:
+                logger.info("google_finance_rss.fetched", ticker=clean, count=len(articles), url=url)
+                break
+        except Exception as exc:
+            logger.warning("google_finance_rss.error", ticker=clean, error=str(exc))
+    return articles[:max_articles]
 
 
 def _settings():
@@ -258,7 +290,24 @@ async def build_live_sentiment_response(
     social_texts = [msg.get("body", "") for msg in st_messages if msg.get("body")]
     social_texts.extend(item.get("text", "") for item in moneycontrol_items if item.get("text"))
 
+    # ── Google Finance RSS fallback when primary scrapers return nothing ──────
+    # Common for NSE tickers: India RSS feeds don't always have ticker-specific items
     if not news_texts and not social_texts:
+        logger.warning("sentiment.primary_scrapers_empty", ticker=ticker, news_count=len(news_articles), social_count=len(st_messages))
+        warnings.append("SCRAPER_RETURNED_EMPTY: Primary scrapers returned no texts — trying Google Finance RSS fallback")
+        loop = asyncio.get_event_loop()
+        fallback_articles = await loop.run_in_executor(None, _fetch_google_finance_rss, ticker, 10)
+        if fallback_articles:
+            fallback_texts = [_article_text(a) for a in fallback_articles if _article_text(a)]
+            if fallback_texts:
+                news_articles = fallback_articles
+                news_texts = fallback_texts
+                warnings.append(f"GOOGLE_FINANCE_RSS_FALLBACK: Using {len(fallback_texts)} articles from fallback RSS")
+                logger.info("sentiment.fallback_rss_used", ticker=ticker, count=len(fallback_texts))
+
+    # If still empty after fallback, return NEUTRAL with explanation
+    if not news_texts and not social_texts:
+        warnings.append("ALL_SOURCES_EMPTY: All news sources returned no content — returning neutral score")
         response = SentimentResponse(
             ticker=ticker,
             composite_score=0.0,

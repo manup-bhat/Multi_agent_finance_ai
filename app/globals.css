@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode - WCAG AA compliant */
+    --background: 210 40% 98%;           /* #F8FAFC */
+    --foreground: 222 84% 5%;            /* #0F172A - for text, contrast ratio 17:1 */
+    --surface: 0 0% 100%;                /* #FFFFFF */
+    --surface-raised: 210 40% 95%;       /* #F1F5F9 */
+    --border: 214 32% 91%;               /* #E2E8F0 */
+    --text-primary: 222 84% 5%;          /* #0F172A - high contrast on light bg */
+    --text-secondary: 215 25% 37%;       /* #475569 - still readable */
+    --text-muted: 215 20% 65%;           /* #94A3B8 - for secondary text */
+  }
+
+  .dark {
+    /* Dark mode - WCAG AA compliant */
+    --background: 225 50% 8%;            /* #0F172A */
+    --foreground: 210 40% 95%;           /* #F1F5F9 - for text, contrast ratio 15:1 */
+    --surface: 222 47% 11%;              /* #1E293B */
+    --surface-raised: 215 33% 17%;       /* #334155 */
+    --border: 215 33% 17%;               /* #334155 */
+    --text-primary: 210 40% 95%;         /* #F1F5F9 - high contrast on dark bg */
+    --text-secondary: 215 20% 65%;       /* #CBD5E1 - readable */
+    --text-muted: 215 25% 37%;           /* #94A3B8 - for secondary text */
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Semantic color backgrounds with proper text contrast */
+  .bg-bullish {
+    @apply bg-bullish-bg;
+  }
+  .bg-bullish .text-content {
+    @apply text-bullish-green;
+  }
+
+  .bg-bearish {
+    @apply bg-bearish-bg;
+  }
+  .bg-bearish .text-content {
+    @apply text-bearish-red;
+  }
+
+  .bg-warning {
+    @apply bg-warning-bg;
+  }
+  .bg-warning .text-content {
+    @apply text-warning-amber;
+  }
+
+  .bg-neutral {
+    @apply bg-neutral-bg;
+  }
+  .bg-neutral .text-content {
+    @apply text-neutral-blue;
+  }
+  /* Tabular numbers for financial data */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Chart text contrast utilities */
+  .chart-text-primary {
+    @apply dark:text-slate-100 text-slate-900;
+  }
+
+  .chart-text-secondary {
+    @apply dark:text-slate-400 text-slate-600;
+  }
+
+  .chart-text-muted {
+    @apply dark:text-slate-500 text-slate-400;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--surface-raised)) 25%,
+      hsl(var(--border)) 50%,
+      hsl(var(--surface-raised)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .card-base {
+    @apply bg-surface rounded-card border border-border shadow-card;
+  }
+
+  .section-label {
+    @apply text-xs font-medium uppercase tracking-widest text-text-muted;
+  }
+
+  .hero-number {
+    @apply text-4xl font-bold tabular-nums;
+  }
+  /* Semantic color utilities with proper contrast */
+  .bg-semantic-bullish {
+    @apply bg-bullish-bg;
+  }
+  .bg-semantic-bullish > * {
+    @apply text-bullish-green;
+  }
+
+  .bg-semantic-bearish {
+    @apply bg-bearish-bg;
+  }
+  .bg-semantic-bearish > * {
+    @apply text-bearish-red;
+  }
+
+  .bg-semantic-warning {
+    @apply bg-warning-bg;
+  }
+  .bg-semantic-warning > * {
+    @apply text-warning-amber;
+  }
+
+  .bg-semantic-neutral {
+    @apply bg-neutral-bg;
+  }
+  .bg-semantic-neutral > * {
+    @apply text-neutral-blue;
+  }
+
+  /* Contrast-safe text color utilities */
+  .text-chart-primary {
+    @apply dark:text-slate-50 text-slate-900;
+  }
+
+  .text-chart-secondary {
+    @apply dark:text-slate-400 text-slate-600;
+  }
+
+  .text-chart-muted {
+    @apply dark:text-slate-500 text-slate-400;
+  }
+
+  .text-chart-accent-saffron {
+    @apply text-saffron;
+  }
+
+  .text-chart-accent-bullish {
+    @apply text-bullish-green;
+  }
+
+  .text-chart-accent-bearish {
+    @apply text-bearish-red;
+  }
+
+  .text-chart-accent-warning {
+    @apply text-warning-amber;
+  }
+
+  .text-chart-accent-neutral {
+    @apply text-neutral-blue;
+  }
+}

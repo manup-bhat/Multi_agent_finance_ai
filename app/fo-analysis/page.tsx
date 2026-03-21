@@ -1,0 +1,367 @@
+"use client";
+import useSWR from "swr";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { HelpPopover } from "@/components/ui/help-popover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useApp } from "@/lib/app-context";
+import { getFnO, getApiErrorMessage } from "@/lib/api-client";
+
+const NSE_SYMBOLS = ["BANKNIFTY", "NIFTY", "FINNIFTY", "MIDCPNIFTY"];
+
+function FnoEducationCards() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {[
+        {
+          term: "Put-Call Ratio (PCR)",
+          body: "Ratio of total put OI to call OI. Above 1.2 = heavy put buying = market makers expect a bounce (contrarian bullish). Below 0.8 = heavy call buying = complacency or froth (contrarian bearish).",
+        },
+        {
+          term: "Max Pain Strike",
+          body: "The strike at which the maximum number of option contracts expire worthless. Market tends to drift toward max pain as expiry nears — useful for weekly expiry (every Thursday on NSE).",
+        },
+        {
+          term: "IV Rank (IVR)",
+          body: "Where current implied volatility sits within its 52-week range. IVR > 70 = sell premium strategies (straddles, iron condors). IVR < 30 = buy premium (directional debit spreads).",
+        },
+        {
+          term: "ATM Implied Volatility",
+          body: "Market's expectation of annualised price moves for the at-the-money strike. High ATM IV before major events (budget, RBI policy, earnings) is normal — price the move before entering.",
+        },
+        {
+          term: "Participant OI",
+          body: "NSE publishes daily futures open interest by participant type: FII, DII, and Client (retail). FII net long + Client net short is the classic contrarian bullish setup.",
+        },
+        {
+          term: "Options Greeks",
+          body: "Delta = price sensitivity. Gamma = rate of delta change. Theta = time decay per day. Vega = sensitivity to IV change. Rho = sensitivity to interest rate. ATM options have the highest Gamma and Vega.",
+        },
+      ].map((item) => (
+        <div key={item.term} className="card-base p-4">
+          <div className="text-sm font-semibold text-text-primary mb-1">{item.term}</div>
+          <p className="text-xs text-text-muted leading-relaxed">{item.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function FOPage() {
+  const { selectedTicker, analysisData } = useApp();
+  const [symbol, setSymbol] = useState("BANKNIFTY");
+
+  const { data: fno, error, isLoading } = useSWR(
+    ["fno", symbol],
+    () => getFnO(symbol),
+    { revalidateOnFocus: false }
+  );
+
+  // IV rank bar color
+  const ivRankColor = (rank: number | null) =>
+    rank == null ? "#94A3B8" : rank > 70 ? "#059669" : rank > 40 ? "#D97706" : "#DC2626";
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 max-w-screen-2xl mx-auto">
+        <Skeleton className="h-7 w-44" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6 max-w-screen-2xl mx-auto">
+        <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
+        <div className="card-base p-8 text-center">
+          <p className="text-bearish-red font-medium mb-2">Failed to load F&O data</p>
+          <p className="text-sm text-text-muted">{getApiErrorMessage(error)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isMarketClosed = fno?.source === "market_closed";
+  const isUnavailable = fno?.source === "unavailable";
+
+  const symbolSelector = (
+    <div className="flex gap-1">
+      {NSE_SYMBOLS.map((s) => (
+        <button
+          key={s}
+          onClick={() => setSymbol(s)}
+          className={cn(
+            "px-3 py-1.5 text-xs rounded-badge font-medium transition-all duration-150",
+            symbol === s
+              ? "bg-saffron text-white"
+              : "text-text-muted hover:text-text-primary hover:bg-surface-raised"
+          )}
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 max-w-screen-2xl mx-auto">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-text-primary">F&O Analysis</h1>
+          <HelpPopover content={{
+            title: "F&O (Futures & Options) Analysis",
+            body: "F&O data reveals what institutional traders are positioning for. Put-Call Ratio shows whether big money is protecting downside (bullish) or buying upside calls (bearish). Max Pain shows where most option contracts will expire worthless — the underlying tends to gravitate toward this level near expiry.",
+            affectsVerdict: "F&O agent contributes ~15% weight to the final verdict. High PCR + low IV rank = strong bullish F&O signal.",
+            source: "NSE option chain — live data during market hours (9:15–15:30 IST weekdays)",
+          }} />
+        </div>
+        {symbolSelector}
+      </div>
+
+      {!fno ? (
+        <div className="card-base p-8 text-center text-text-muted">
+          <p className="font-medium text-text-secondary mb-2">No F&O data available</p>
+          <p className="text-sm">Select a symbol above or run an analysis from the Dashboard with F&O enabled.</p>
+        </div>
+      ) : isMarketClosed ? (
+        <div className="space-y-5">
+          <div className="card-base p-6 border border-warning-amber/20 bg-warning-bg">
+            <div className="flex items-start gap-3">
+              <div className="w-2.5 h-2.5 rounded-full bg-warning-amber flex-shrink-0 mt-1" />
+              <div>
+                <div className="font-semibold text-warning-amber text-sm mb-1">NSE Option Chain Unavailable — Market Closed</div>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  NSE only publishes live option chains during market hours (9:15 AM – 3:30 PM IST, Monday–Friday).
+                  F&O data will load automatically when the market opens. During off-hours, the pre-close snapshot may be available.
+                </p>
+              </div>
+            </div>
+          </div>
+          {symbolSelector}
+          <FnoEducationCards />
+        </div>
+      ) : isUnavailable ? (
+        <div className="space-y-5">
+          <div className="card-base p-6">
+            <p className="text-sm text-bearish-red font-medium mb-2">F&O data currently unavailable</p>
+            <p className="text-xs text-text-muted">{fno.strategy_recommendation}</p>
+          </div>
+          <FnoEducationCards />
+        </div>
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* PCR */}
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  Put-Call Ratio
+                </div>
+                <HelpPopover content={{
+                  title: "Put-Call Ratio (PCR)",
+                  body: "Ratio of total put open interest to call open interest. PCR > 1.2 = high put buying = bullish. PCR < 0.8 = high call buying = bearish.",
+                  affectsVerdict: "PCR is a direct input to the F&O agent's bullish/bearish scoring. Extreme PCR values (>1.5 or <0.6) trigger higher confidence.",
+                  source: "NSE option chain — calculated from total OI",
+                }} />
+              </div>
+              <div className={cn(
+                "text-4xl font-bold tabular-nums",
+                fno.pcr == null ? "text-text-muted"
+                  : fno.pcr > 1.2 ? "text-bullish-green"
+                  : fno.pcr < 0.8 ? "text-bearish-red"
+                  : "text-warning-amber"
+              )}>
+                {fno.pcr != null ? fno.pcr.toFixed(2) : "—"}
+              </div>
+              <span className={cn(
+                "inline-flex mt-1 px-2 py-0.5 rounded-badge text-xs font-medium",
+                fno.pcr_signal.includes("Bullish") ? "bg-bullish-bg text-bullish-green"
+                  : fno.pcr_signal.includes("Bearish") ? "bg-bearish-bg text-bearish-red"
+                  : "bg-warning-bg text-warning-amber"
+              )}>
+                {fno.pcr_signal}
+              </span>
+            </div>
+
+            {/* Max Pain */}
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  Max Pain
+                </div>
+                <HelpPopover content={{
+                  title: "Max Pain Strike",
+                  body: "The strike price at which the maximum number of options contracts (both puts and calls) expire worthless. The underlying tends to gravitate toward max pain near expiry.",
+                  affectsVerdict: "If current price is far above max pain, options writers will hedge downward — a bearish pressure near expiry.",
+                  source: "Calculated from full NSE option chain open interest",
+                }} />
+              </div>
+              <div className="text-4xl font-bold tabular-nums text-text-primary">
+                {fno.max_pain != null
+                  ? `₹${fno.max_pain.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                  : "—"}
+              </div>
+              <div className="text-xs text-text-muted mt-1">
+                Expiry: {fno.expiry}
+              </div>
+            </div>
+
+            {/* IV Rank */}
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-xs text-text-muted uppercase tracking-widest font-medium">
+                  IV Rank
+                </div>
+                <HelpPopover content={{
+                  title: "Implied Volatility Rank",
+                  body: "Where current IV sits relative to its 52-week range. IVR > 70 means volatility is high — selling premium (straddles, iron condors) is more attractive. IVR < 30 means volatility is cheap — buy premium.",
+                  affectsVerdict: "High IVR triggers a 'sell premium' strategy recommendation. Low IVR triggers directional buying.",
+                  source: "52-week IV range from NSE option chain historical data",
+                }} />
+              </div>
+              <div
+                className="text-4xl font-bold tabular-nums"
+                style={{ color: ivRankColor(fno.iv_rank_pct) }}
+              >
+                {fno.iv_rank_pct != null ? `${fno.iv_rank_pct.toFixed(0)}` : "—"}
+              </div>
+              <span className={cn(
+                "inline-flex mt-1 px-2 py-0.5 rounded-badge text-xs font-medium",
+                fno.iv_rank_pct == null ? "bg-surface-raised text-text-muted"
+                  : fno.iv_rank_pct > 70 ? "bg-bullish-bg text-bullish-green"
+                  : fno.iv_rank_pct > 40 ? "bg-warning-bg text-warning-amber"
+                  : "bg-bearish-bg text-bearish-red"
+              )}>
+                {fno.iv_rank_pct == null ? "Unknown"
+                  : fno.iv_rank_pct > 70 ? "High — Sell Premium"
+                  : fno.iv_rank_pct > 40 ? "Moderate"
+                  : "Low — Buy Premium"}
+              </span>
+            </div>
+
+            {/* ATM IV */}
+            <div className="card-base p-5">
+              <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-2">
+                ATM Implied Volatility
+              </div>
+              <div className="text-4xl font-bold tabular-nums text-text-primary">
+                {fno.atm_iv != null ? `${fno.atm_iv.toFixed(1)}%` : "—"}
+              </div>
+              <div className="text-xs text-text-muted mt-1">
+                IV Skew: {fno.skew ?? "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Strategy Recommendation */}
+          <div className="card-base p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-base font-semibold text-text-primary">Strategy Recommendation</h3>
+              <HelpPopover content={{
+                title: "F&O Strategy",
+                body: "Strategy is selected based on IV rank, PCR, max pain distance, and skew. High IV → sell premium; low IV → buy premium.",
+                affectsVerdict: "Recommended strategy is derived from the combined F&O analysis and affects position sizing in the overall verdict.",
+                source: "F&O agent — rules-based strategy selector",
+              }} />
+            </div>
+            <div className="px-4 py-3 rounded-card bg-saffron-light border border-saffron/20">
+              <p className="text-sm font-semibold text-saffron">{fno.strategy_recommendation}</p>
+            </div>
+            <div className="mt-3 text-xs text-text-muted">
+              Source: {fno.source} | FII Futures Net: {fno.fii_futures_net}
+            </div>
+          </div>
+
+          {/* ATM Greeks */}
+          {Object.keys(fno.greeks_atm).length > 0 && (
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-base font-semibold text-text-primary">ATM Option Greeks</h3>
+                <HelpPopover content={{
+                  title: "Option Greeks — ATM Strike",
+                  body: "Greeks measure sensitivity of the ATM option price to changes in underlying, time, and volatility.",
+                  affectsVerdict: "High Gamma near expiry amplifies moves; high Vega means IV changes dominate over delta moves.",
+                  source: "NSE option chain — Black-Scholes Greeks",
+                }} />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {Object.entries(fno.greeks_atm).map(([key, val]) => (
+                  <div key={key} className="text-center p-3 rounded-card bg-surface-raised">
+                    <div className="text-xs text-text-muted uppercase tracking-widest mb-1">{key}</div>
+                    <div className="text-xl font-bold tabular-nums text-text-primary">
+                      {typeof val === "number" ? val.toFixed(4) : val}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Participant OI */}
+          {Object.keys(fno.participant_oi).length > 0 && (
+            <div className="card-base p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-base font-semibold text-text-primary">Participant-wise Futures OI</h3>
+                <HelpPopover content={{
+                  title: "Participant Futures Open Interest",
+                  body: "Long/short futures positions per participant category. Retail (Client) net short is historically a contrarian bullish signal.",
+                  affectsVerdict: "FII net long + Client net short is a strong bullish combination.",
+                  source: "NSE combined futures OI — participant-wise daily data",
+                }} />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-text-muted">
+                      <th className="text-left py-2 font-medium">Participant</th>
+                      <th className="text-right py-2 font-medium">Long</th>
+                      <th className="text-right py-2 font-medium">Short</th>
+                      <th className="text-right py-2 font-medium">Net</th>
+                      <th className="text-left py-2 font-medium pl-4">Signal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {Object.entries(fno.participant_oi).map(([participant, data]) => {
+                      const net = data.net ?? ((data.long ?? 0) - (data.short ?? 0));
+                      return (
+                        <tr key={participant} className="hover:bg-surface-raised transition-colors duration-150">
+                          <td className="py-3 font-semibold text-text-primary">{participant}</td>
+                          <td className="py-3 text-right tabular-nums text-bullish-green">
+                            {data.long != null ? data.long.toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className="py-3 text-right tabular-nums text-bearish-red">
+                            {data.short != null ? data.short.toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className={cn(
+                            "py-3 text-right tabular-nums font-bold",
+                            net >= 0 ? "text-bullish-green" : "text-bearish-red"
+                          )}>
+                            {net >= 0 ? "+" : ""}{net.toLocaleString("en-IN")}
+                          </td>
+                          <td className="py-3 pl-4 text-xs text-text-secondary">
+                            {participant === "FII" && net > 0
+                              ? "Bullish — institutional accumulation"
+                              : participant === "Client" && net < 0
+                              ? "Retail net short — contrarian bullish"
+                              : participant === "DII"
+                              ? "Domestic support"
+                              : "Neutral"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

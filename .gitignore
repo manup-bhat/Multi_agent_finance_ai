@@ -102,4 +102,6 @@ cython_debug/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-.pyre/
+.pyre/node_modules/
+.next/
+node_modules
