@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from api.runtime import warm_app_runtime
 from api.routes import health, analyze, predict, fno, macro, fii_dii, backtest, sentiment
+from api.routes import price as price_routes
 
 logger = structlog.get_logger(__name__)
 
@@ -39,10 +40,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS — allow Streamlit frontend ───────────────────────────────────────
+# ── CORS — Next.js frontend (localhost:3000) + any dev origin ─────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501", "http://127.0.0.1:8501", "*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8501",  # legacy Streamlit
+        "*",                      # Remove in production
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,12 +81,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ── Routes ────────────────────────────────────────────────────────────────
-app.include_router(health.router,   tags=["Health"])
-app.include_router(analyze.router,  tags=["Analysis"])
-app.include_router(predict.router,  tags=["Prediction"])
-app.include_router(sentiment.router, prefix="/sentiment", tags=["Sentiment"])
-app.include_router(fno.router,      prefix="/fno",   tags=["F&O"])
-app.include_router(macro.router,    prefix="/macro",  tags=["Macro"])
-app.include_router(fii_dii.router,  prefix="/fii-dii", tags=["FII/DII"])
-app.include_router(backtest.router,  tags=["Backtest"])
+app.include_router(health.router,       tags=["Health"])
+app.include_router(analyze.router,      tags=["Analysis"])
+app.include_router(predict.router,      tags=["Prediction"])
+app.include_router(sentiment.router,    prefix="/sentiment",  tags=["Sentiment"])
+app.include_router(fno.router,          prefix="/fno",        tags=["F&O"])
+app.include_router(macro.router,        prefix="/macro",       tags=["Macro"])
+app.include_router(fii_dii.router,      prefix="/fii-dii",    tags=["FII/DII"])
+app.include_router(backtest.router,     tags=["Backtest"])
+app.include_router(price_routes.router, tags=["Price/OHLCV"])  # /api/price/{ticker}
+

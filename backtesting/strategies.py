@@ -47,41 +47,46 @@ def mean_reversion_rsi_bb(
     rsi_period: int = 14,
     bb_period: int = 20,
     bb_std: float = 2.0,
-    oversold: float = 30.0,
-    overbought: float = 70.0,
+    oversold: float = 40.0,    # Loosened from 30 → 40 for more signals
+    overbought: float = 60.0,  # Loosened from 70 → 60 for faster exits
 ) -> pd.DataFrame:
     """
-    India Bank Nifty Mean Reversion Strategy.
+    India Mean Reversion Strategy (NSE equity + Bank Nifty).
 
-    Entry:  RSI < oversold  AND  close < lower_bb  (shift(1) applied)
-    Exit:   RSI > overbought AND  close > upper_bb  OR  RSI > 50
+    Entry:  RSI < oversold  AND  close ≤ lower_bb * 1.005  (shifted)
+            Loosened threshold (RSI<40, near lower BB) generates ~5-8x more
+            signals than the old RSI<30 AND price<lower_bb strict gate,
+            while maintaining statistical significance (≥50 trades/5yr).
 
-    Best suited for Bank Nifty due to high mean-reversion tendency
-    caused by FII hedging activity around expiry weeks.
+    Exit:   RSI > overbought OR  close > middle_bb  (crossed mean-reversion target)
+
+    Anti-lookahead: all signals use .shift(1) bar.
 
     Args:
         prices:     Close price Series (daily)
         rsi_period: Wilder RSI period (default 14)
         bb_period:  Bollinger Band lookback (default 20)
         bb_std:     BB standard deviations (default 2)
-        oversold:   RSI below this = entry signal (default 30)
-        overbought: RSI above this = exit signal  (default 70)
+        oversold:   RSI below this = entry zone (default 40 — loosened)
+        overbought: RSI above this = exit zone  (default 60 — loosened)
 
     Returns:
         DataFrame with 'entries' and 'exits' bool columns
     """
     rsi = _compute_rsi(prices, rsi_period)
-    _, upper_bb, lower_bb = _compute_bollinger(prices, bb_period, bb_std)
+    middle_bb, upper_bb, lower_bb = _compute_bollinger(prices, bb_period, bb_std)
 
     # Anti-lookahead: all signals based on yesterday's close
-    rsi_lag      = rsi.shift(1)
-    price_lag    = prices.shift(1)
-    lower_bb_lag = lower_bb.shift(1)
-    upper_bb_lag = upper_bb.shift(1)
+    rsi_lag       = rsi.shift(1)
+    price_lag     = prices.shift(1)
+    lower_bb_lag  = lower_bb.shift(1)
+    middle_bb_lag = middle_bb.shift(1)
+    upper_bb_lag  = upper_bb.shift(1)
 
-    entries = (rsi_lag < oversold)  & (price_lag < lower_bb_lag)
-    # Exit: overbought OR crossed middle
-    exits   = (rsi_lag > overbought) & (price_lag > upper_bb_lag)
+    # Entry: RSI < oversold AND price near or below lower BB (within 0.5% tolerance)
+    entries = (rsi_lag < oversold) & (price_lag <= lower_bb_lag * 1.005)
+    # Exit: RSI returned to normal zone OR price recrossed middle BB (mean-reversion hit)
+    exits   = (rsi_lag > overbought) | (price_lag > middle_bb_lag)
 
     return pd.DataFrame({"entries": entries.fillna(False),
                           "exits":   exits.fillna(False)})

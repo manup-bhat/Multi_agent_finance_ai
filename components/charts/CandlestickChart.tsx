@@ -20,9 +20,8 @@ export interface CandlestickChartProps {
 }
 
 const TIMEFRAMES = ['1D', '1W', '1M', '3M', '6M', '1Y', '2Y'];
-const PERIOD_MAP: Record<string, string> = {
-  '1D': '1d', '1W': '1w', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y', '2Y': '2y',
-};
+// These keys map 1:1 to the backend PERIOD_MAP in api/routes/price.py
+// Backend accepts: 1D|1W|1M|3M|6M|1Y|2Y (and legacy 1d|1w|1mo|3mo|6mo|1y|2y)
 
 const OVERLAY_BUTTONS = ['VWAP', 'VWAP ±1σ', 'VWAP ±2σ', 'EMA 20', 'EMA 50', 'EMA 200', 'BB', 'Supertrend', 'Fibonacci', 'Pivots', 'SMC', 'RS'];
 
@@ -107,20 +106,27 @@ export function CandlestickChart({
     setLoading(true);
     setError(null);
     try {
-      const apiPeriod = PERIOD_MAP[tf] || '3mo';
+      // Send the timeframe key directly — backend accepts '3M', '1Y' etc.
       const resp = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/price/${encodeURIComponent(ticker)}?period=${apiPeriod}`
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/price/${encodeURIComponent(ticker)}?period=${encodeURIComponent(tf)}`
       );
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail || `HTTP ${resp.status}`);
+      }
       const json = await resp.json();
-      const candles = (json.candles || json.data || []).map((c: any) => ({
-        time: c.time || c.date,
+      // API returns { candles: [{time, open, high, low, close}], volume: [{time, value, color}] }
+      const candles = (json.candles || json.data || []).filter(
+        (c: any) => c.time && c.open != null && c.high != null && c.low != null && c.close != null
+      ).map((c: any) => ({
+        time: typeof c.time === 'string' ? Math.floor(new Date(c.time).getTime() / 1000) : c.time,
         open: c.open,
         high: c.high,
         low: c.low,
         close: c.close,
-        volume: c.volume,
+        volume: c.volume ?? 0,
       }));
+      if (!candles.length) throw new Error('No OHLCV data returned. Check ticker symbol.');
       setPriceData(candles);
     } catch (e: any) {
       setError(e.message);
