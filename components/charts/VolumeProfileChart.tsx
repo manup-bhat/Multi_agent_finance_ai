@@ -9,7 +9,7 @@ import { formatPrice, formatVolume } from '@/lib/format-india';
 
 const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 
-interface VolumeProfileChartProps {
+export interface VolumeProfileChartProps {
   ticker: string;
   period?: string;
 }

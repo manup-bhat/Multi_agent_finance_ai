@@ -13,7 +13,7 @@ interface PcrData {
   pcr: number[];
 }
 
-interface PcrHistoryChartProps {
+export interface PcrHistoryChartProps {
   ticker?: string;
 }
 

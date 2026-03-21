@@ -169,15 +169,7 @@ export default function SectorRotationPage() {
 
       <div className="card-base p-5">
         <h3 className="text-base font-semibold text-text-primary mb-4">Relative Rotation Graph (RRG)</h3>
-        <SectorRotationChart
-          data={data.map((d) => ({
-            sector: d.sector,
-            rs: +(d.relative_strength - 100).toFixed(2),
-            rsMomentum: +(d.momentum - 100).toFixed(2),
-            volumeRatio: d.flow != null ? Math.abs(d.flow) : undefined,
-          }))}
-          height={400}
-        />
+        <SectorRotationChart />
         <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
           {QUADRANTS.map((q) => (
             <div key={q.phase} className={cn("p-3 rounded-btn", q.bg)}>

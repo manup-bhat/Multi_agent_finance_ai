@@ -9,7 +9,7 @@ import { formatPrice } from '@/lib/format-india';
 const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 import 'apexcharts/features/annotations';
 
-interface FanChartProps {
+export interface FanChartProps {
   ticker?: string;
   horizon?: number;
 }

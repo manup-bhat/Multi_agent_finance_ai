@@ -8,7 +8,7 @@ import { formatPct } from '@/lib/format-india';
 
 const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 
-interface ShapChartProps {
+export interface ShapChartProps {
   ticker?: string;
 }
 

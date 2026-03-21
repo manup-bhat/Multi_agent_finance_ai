@@ -7,7 +7,7 @@ import { ChartSkeleton } from './chart-skeleton';
 
 const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 
-interface SectorRotationChartProps {
+export interface SectorRotationChartProps {
   ticker?: string;
 }
 

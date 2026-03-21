@@ -16,7 +16,7 @@ interface MarketBreadthData {
   above200DMA: number[];
 }
 
-interface MarketBreadthChartProps {
+export interface MarketBreadthChartProps {
   ticker?: string;
 }
 

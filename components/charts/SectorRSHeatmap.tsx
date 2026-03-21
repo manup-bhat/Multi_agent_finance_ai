@@ -8,7 +8,7 @@ import { ChartSkeleton } from './chart-skeleton';
 const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 import 'apexcharts/features/legend';
 
-interface SectorRSHeatmapProps {
+export interface SectorRSHeatmapProps {
   ticker?: string;
 }
 

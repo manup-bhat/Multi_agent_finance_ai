@@ -122,7 +122,7 @@ export default function DashboardDemo() {
 
           {/* VIX Index */}
           <div className="bg-surface rounded-lg border border-border p-6 shadow-card lg:col-span-1">
-            <VixChart data={mockVixData} variant="full" height={300} />
+            <VixChart variant="full" height={300} />
           </div>
         </section>
 
