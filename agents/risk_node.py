@@ -10,9 +10,14 @@ Rules applied in priority order:
   4. Expiry Thursday → Flag gamma risk
   5. Prediction confidence < 50% → Flag LOW CONFIDENCE
   6. Kelly Criterion position sizing
-  7. SEBI ≤ 10 OPS rate limit check
+  7. SEBI ≤ 10 OPS rate limit — live token-bucket check
 
 NO LLM is called in this node. All logic is deterministic Python.
+
+Audit fixes (2026-03-21):
+  - Entire body wrapped in try/except → failsafe HOLD on any crash
+  - sebi_compliant uses live SEBI_RATE_LIMITER.check_sebi_compliance()
+    instead of hardcoded True
 """
 from __future__ import annotations
 
@@ -28,12 +33,35 @@ from config.constants import (
 from config.india_calendar import is_expiry_thursday
 from risk.circuit_breaker import apply_circuit_breaker
 from risk.position_sizer import compute_position_size
+from data.rate_limiter import SEBI_RATE_LIMITER
 
 logger = structlog.get_logger(__name__)
 
 # Blueprint FII sell streak reduction
 FII_STREAK_SIZE_REDUCTION = 0.60   # Keep 60% of normal size (reduce by 40%)
 MIN_CONFIDENCE_THRESHOLD  = 0.50   # Flag LOW CONFIDENCE below this
+
+# Failsafe state returned if run_risk_node crashes
+_FAILSAFE_RISK_OUTPUT: dict[str, Any] = {
+    "circuit_breaker_active":  True,
+    "crisis_mode":             False,
+    "position_size_multiplier": 0.0,
+    "fii_streak_alert":        False,
+    "fii_streak_days":         0,
+    "gamma_risk_flag":         False,
+    "low_confidence_flag":     True,
+    "euphoria_flag":           False,
+    "fear_greed":              50,
+    "social_volume":           0,
+    "complacency_warning":     False,
+    "kelly_fraction":          0.0,
+    "kelly_details":           {"raw_kelly": 0.0, "half_kelly": 0.0, "max_lots": 0, "lot_size": 0},
+    "sebi_compliant":          True,
+    "sebi_compliance_note":    "FAILSAFE: risk_node crashed; defaulting to HOLD",
+    "override_verdict":        "HOLD",
+    "risk_level":              "HIGH",
+    "notes":                   ["RISK_NODE_CRASHED: forced HOLD by failsafe."],
+}
 
 
 def _extract_vix(state: IndiaEngineState) -> float:
@@ -90,9 +118,32 @@ def run_risk_node(state: IndiaEngineState) -> dict:
     """
     LangGraph node: Pure Python deterministic risk assessment.
     Writes risk_node_output dict to state.
+
+    Safety guarantee: any uncaught exception returns a failsafe HOLD state
+    rather than crashing the LangGraph pipeline.
     """
     ticker = state.get("ticker", "N/A")
     logger.info("risk_node.start", ticker=ticker)
+
+    try:
+        return _run_risk_node_impl(state, ticker)
+    except Exception as exc:
+        logger.exception(
+            "risk_node.FAILSAFE_TRIGGERED",
+            ticker=ticker,
+            error=str(exc),
+            action="forcing_HOLD",
+        )
+        failsafe = dict(_FAILSAFE_RISK_OUTPUT)  # shallow copy
+        failsafe["notes"] = [f"RISK_NODE_CRASHED ({type(exc).__name__}: {exc}). Forced HOLD."]
+        return {
+            "risk_node_output": failsafe,
+            "verdict": "HOLD",
+        }
+
+
+def _run_risk_node_impl(state: IndiaEngineState, ticker: str) -> dict:
+    """Inner implementation — called by run_risk_node inside try/except."""
 
     vix = _extract_vix(state)
     fii_streak = _extract_fii_streak(state)
@@ -154,7 +205,7 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         )
 
     # ── 7. Kelly Criterion position size ─────────────────────────
-    # Use confidence as a proxy for win probability; assume 1.5:1 reward/risk
+    # Use confidence as a proxy for win probability; assume 1.67:1 reward/risk
     kelly_result = compute_position_size(
         win_probability=max(0.35, min(0.75, confidence)),
         avg_win_pct=0.05,    # 5% average win
@@ -163,8 +214,15 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         ticker=ticker,
     )
 
-    # ── 8. SEBI rate limit check ──────────────────────────────────
-    sebi_compliant = True   # Check is advisory — actual enforcement at API layer
+    # ── 8. SEBI rate limit — live token-bucket check ──────────────
+    # Replaces the hardcoded `sebi_compliant = True` (audit fix)
+    try:
+        sebi_compliant, sebi_note = SEBI_RATE_LIMITER.check_sebi_compliance()
+    except Exception as sebi_exc:
+        sebi_compliant = True   # don't block decisions on diagnostics failure
+        sebi_note = f"SEBI check error (non-blocking): {sebi_exc}"
+    if not sebi_compliant:
+        notes.append(f"SEBI RATE BREACH: {sebi_note}. Reduce outbound API calls.")
 
     # ── Override verdict if circuit breaker ──────────────────────
     current_verdict = state.get("verdict", "HOLD")
@@ -181,31 +239,32 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         risk_level = "LOW"
 
     risk_output: dict[str, Any] = {
-        "circuit_breaker_active": circuit_breaker_active,
-        "crisis_mode": crisis_mode,
+        "circuit_breaker_active":  circuit_breaker_active,
+        "crisis_mode":             crisis_mode,
         "position_size_multiplier": round(vix_multiplier, 4),
-        "fii_streak_alert": fii_streak_alert,
-        "fii_streak_days": fii_streak,
-        "gamma_risk_flag": gamma_risk_flag,
-        "low_confidence_flag": low_confidence_flag,
-        "euphoria_flag": euphoria_flag,
-        "fear_greed": fear_greed,
-        "social_volume": social_volume,
-        "complacency_warning": complacency_warning,
-        "kelly_fraction": kelly_result.recommended_capital_pct,
+        "fii_streak_alert":        fii_streak_alert,
+        "fii_streak_days":         fii_streak,
+        "gamma_risk_flag":         gamma_risk_flag,
+        "low_confidence_flag":     low_confidence_flag,
+        "euphoria_flag":           euphoria_flag,
+        "fear_greed":              fear_greed,
+        "social_volume":           social_volume,
+        "complacency_warning":     complacency_warning,
+        "kelly_fraction":          kelly_result.recommended_capital_pct,
         "kelly_details": {
-            "raw_kelly": kelly_result.kelly_fraction,
-            "half_kelly": kelly_result.half_kelly_fraction,
-            "max_lots": kelly_result.max_lots,
-            "lot_size": kelly_result.lot_size,
+            "raw_kelly":   kelly_result.kelly_fraction,
+            "half_kelly":  kelly_result.half_kelly_fraction,
+            "max_lots":    kelly_result.max_lots,
+            "lot_size":    kelly_result.lot_size,
         },
-        "sebi_compliant": sebi_compliant,
-        "override_verdict": override_verdict,
-        "risk_level": risk_level,
-        "notes": notes,
+        "sebi_compliant":          sebi_compliant,
+        "sebi_compliance_note":    sebi_note,
+        "override_verdict":        override_verdict,
+        "risk_level":              risk_level,
+        "notes":                   notes,
     }
 
-    updates = {"risk_node_output": risk_output}
+    updates: dict[str, Any] = {"risk_node_output": risk_output}
     if circuit_breaker_active:
         updates["verdict"] = "HOLD"
 
@@ -213,5 +272,6 @@ def run_risk_node(state: IndiaEngineState) -> dict:
         "risk_node.done",
         vix=vix, circuit_breaker=circuit_breaker_active,
         risk_level=risk_level, override=override_verdict,
+        sebi_compliant=sebi_compliant,
     )
     return updates

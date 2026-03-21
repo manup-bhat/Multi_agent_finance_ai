@@ -38,6 +38,7 @@ from prediction.models.hmm_regime import HMMRegimeDetector, REGIME_NAMES
 from prediction.models.ensemble_predictor import EnsemblePredictor
 from prediction.inference.confidence_calculator import ConfidenceCalculator
 from prediction.inference.model_router import ModelRouter
+from features.feature_validator import validate_features as _validate_features
 
 logger = structlog.get_logger(__name__)
 
@@ -403,7 +404,53 @@ class PredictionService:
             result.top_features    = [{"feature": "VIX_CIRCUIT_BREAKER", "value": vix_current, "impact": -1.0}]
             return result
 
-        # ── Step 1: HMM Regime Detection ──────────────────────────────────────
+        # ── Gate 2: Anti-Lookahead Feature Validation (audit fix 2026-03-21) ─
+        # Ensures broken adapters (all-NaN columns) are caught BEFORE they
+        # corrupt model inference. Uses the same FeatureValidator that guards
+        # training time, but in advisory (non-crash) mode for live inference.
+        try:
+            fv_report = _validate_features(
+                feature_df,
+                close_series=price_series,
+                ticker=self.ticker,
+            )
+            if not fv_report.passed:
+                logger.warning(
+                    "prediction_service.feature_validation_failed",
+                    ticker=self.ticker,
+                    same_day_leaks=fv_report.same_day_leaks,
+                    null_columns=fv_report.null_columns,
+                    warnings_count=len(fv_report.warnings),
+                )
+                # Attach validation issues to result for transparency
+                result.top_features = [
+                    {
+                        "feature": col,
+                        "value": 0.0,
+                        "impact": -1.0,
+                        "note": "NULL_COLUMN: adapter returned all-NaN",
+                    }
+                    for col in fv_report.null_columns[:5]
+                ] or [
+                    {
+                        "feature": leak,
+                        "value": 0.0,
+                        "impact": -0.5,
+                        "note": "LOOKAHEAD_RISK: high same-day correlation",
+                    }
+                    for leak in fv_report.same_day_leaks[:5]
+                ]
+                # Degrade confidence; do NOT block inference completely (untrained models still run)
+                result.confidence = min(result.confidence, 0.35)
+                result.is_high_confidence = False
+        except Exception as fv_exc:
+            logger.warning(
+                "prediction_service.feature_validation_error",
+                ticker=self.ticker,
+                error=str(fv_exc),
+            )
+
+        # ── Step 1: HMM Regime Detection ─────────────────────────────────────
         nifty_aligned = nifty_returns.reindex(feature_df.index).ffill().fillna(0.0)
         vix_aligned   = vix_series.reindex(feature_df.index).ffill() if vix_series is not None else None
 
