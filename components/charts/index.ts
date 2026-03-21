@@ -6,7 +6,7 @@ export { FearGreedGauge } from './fear-greed-gauge';
 export type { FearGreedGaugeProps } from './fear-greed-gauge';
 
 export { FiiDiiChart } from './fii-dii-chart';
-export type { FiiDiiChartProps, FiiDiiData } from './fii-dii-chart';
+export type { FiiDiiChartProps } from './fii-dii-chart';
 
 export { RiskGauge } from './risk-gauge';
 
@@ -15,8 +15,8 @@ export { SectorHeatmap } from './sector-heatmap';
 export { SentimentTimelineChart } from './sentiment-timeline';
 export type { SentimentTimelineChartProps } from './sentiment-timeline';
 
-export { VixChart } from './vix-chart';
-export type { VixChartProps } from './vix-chart';
+export { VixChart } from './VixChart';
+export type { VixChartProps } from './VixChart';
 
 export { SparklineBar } from './sparkline-bar';
 
@@ -36,7 +36,22 @@ export { PayoffChart } from './PayoffChart';
 export type { PayoffChartProps } from './PayoffChart';
 
 export { SectorRotationChart } from './SectorRotationChart';
-export type { SectorRotationChartProps, SectorRotationDataPoint } from './SectorRotationChart';
+export type { SectorRotationChartProps } from './SectorRotationChart';
+
+export { SectorRSHeatmap } from './SectorRSHeatmap';
+export type { SectorRSHeatmapProps } from './SectorRSHeatmap';
+
+export { VolumeProfileChart } from './VolumeProfileChart';
+export type { VolumeProfileChartProps } from './VolumeProfileChart';
+
+export { MarketBreadthChart } from './MarketBreadthChart';
+export type { MarketBreadthChartProps } from './MarketBreadthChart';
+
+export { PcrHistoryChart } from './PcrHistoryChart';
+export type { PcrHistoryChartProps } from './PcrHistoryChart';
+
+export { FanChart } from './FanChart';
+export type { FanChartProps } from './FanChart';
 
 // Lightweight-charts component (canvas, always ssr:false)
 export { CandlestickChart } from './CandlestickChart';

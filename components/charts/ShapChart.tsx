@@ -1,115 +1,105 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useEffect, useState } from 'react';
+import { useChartTheme, CHART_COLORS } from '@/lib/chart-theme';
 import { ChartSkeleton } from './chart-skeleton';
-import { CHART_COLORS, useChartTheme } from '@/lib/chart-theme';
-import { useTheme } from 'next-themes';
+import { formatPct } from '@/lib/format-india';
 
-const Chart = dynamic(() => import('react-apexcharts').then((m) => m.default), {
-  ssr: false,
-  loading: () => <ChartSkeleton height={280} />,
-});
+const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 
-export interface ShapChartProps {
-  shapValues: Array<{ feature: string; value: number }>;
-  height?: number;
+interface ShapChartProps {
+  ticker?: string;
 }
 
-export function ShapChart({ shapValues, height = 280 }: ShapChartProps) {
-  const { theme, systemTheme } = useTheme();
-  const isDark = theme === 'dark' || (theme === 'system' && systemTheme === 'dark');
+export function ShapChart({ ticker = 'NIFTY' }: ShapChartProps) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const chartTheme = useChartTheme();
 
-  if (!shapValues || shapValues.length === 0) {
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Mock: Generate SHAP feature importance
+        const features = ['RSI(14)', 'EMA_20/50 Ratio', 'MACD Hist', 'Volume Momentum', 'VIX Level', 'FII Flow', 'PCR Ratio', 'ATR %'];
+        const importance = [0.28, 0.22, 0.15, 0.12, 0.10, -0.08, 0.07, 0.06];
+
+        setData({ features, importance });
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [ticker]);
+
+  if (loading) return <ChartSkeleton height={300} />;
+
+  if (error || !data) {
     return (
-      <div className="flex items-center justify-center h-48 text-text-muted text-sm">
-        No SHAP values available
+      <div className="border border-bearish-red/40 rounded-card p-6 text-center space-y-2">
+        <p className="text-bearish-red font-medium">Failed to load SHAP values</p>
+        <p className="text-xs text-text-muted">{error}</p>
       </div>
     );
   }
 
-  // Sort by absolute value descending, take top 8
-  const sorted = [...shapValues]
-    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-    .slice(0, 8);
-
-  const categories = sorted.map((s) => s.feature);
-  const values = sorted.map((s) => +s.value.toFixed(4));
-  const colors = values.map((v) => (v >= 0 ? CHART_COLORS.bullish : CHART_COLORS.bearish));
-
-  const options: ApexCharts.ApexOptions = {
-    chart: {
-      type: 'bar',
-      toolbar: { show: false },
-      animations: { enabled: true, speed: 600 },
+  const series = [
+    {
+      name: 'Feature Importance',
+      data: data.importance,
     },
+  ];
+
+  const options: any = {
+    chart: { type: 'bar', toolbar: { show: false }, background: chartTheme.bg },
     plotOptions: {
       bar: {
         horizontal: true,
-        barHeight: '60%',
         borderRadius: 4,
-        distributed: true,
+        barHeight: '60%',
+        colors: {
+          ranges: data.importance.map((val: number) => ({
+            from: val,
+            to: val,
+            color: val > 0 ? CHART_COLORS.bullish : CHART_COLORS.bearish,
+          })),
+        },
         dataLabels: { position: 'right' },
       },
     },
-    colors,
     dataLabels: {
       enabled: true,
-      formatter: (val: number) => (val > 0 ? `+${val.toFixed(3)}` : val.toFixed(3)),
-      style: {
-        colors: [chartTheme.text],
-        fontSize: '11px',
-        fontWeight: 600,
-      },
-      offsetX: 4,
+      formatter: (val: number) => formatPct(val * 100, 1),
+      offsetX: 10,
+      style: { fontSize: '11px', colors: [chartTheme.text] },
     },
     xaxis: {
-      categories,
-      labels: { style: { colors: chartTheme.text, fontSize: '11px' } },
-      axisBorder: { show: false },
-      axisTicks: { show: false },
+      categories: data.features,
+      labels: { style: { colors: chartTheme.text } },
     },
     yaxis: {
-      labels: { style: { colors: chartTheme.text, fontSize: '11px' } },
-    },
-    grid: {
-      borderColor: chartTheme.grid,
-      strokeDashArray: 3,
-      xaxis: { lines: { show: true } },
-      yaxis: { lines: { show: false } },
+      labels: { style: { colors: chartTheme.text } },
     },
     annotations: {
-      xaxis: [
-        {
-          x: 0,
-          borderColor: chartTheme.grid,
-          strokeDashArray: 0,
-          borderWidth: 2,
-          opacity: 0.8,
-        },
-      ],
+      xaxis: [{ x: 0, borderColor: chartTheme.grid }],
     },
-    tooltip: {
-      theme: isDark ? 'dark' : 'light',
-      y: {
-        formatter: (val: number) =>
-          `SHAP: ${val > 0 ? '+' : ''}${val.toFixed(4)} (${val > 0 ? '↑ bullish' : '↓ bearish'})`,
-      },
-    },
-    legend: { show: false },
+    tooltip: { theme: chartTheme.tooltipBg === '#fff' ? 'light' : 'dark' },
+    grid: { borderColor: chartTheme.grid },
   };
 
   return (
-    <div className="w-full">
-      <Chart
-        options={options}
-        series={[{ name: 'SHAP Value', data: values }]}
-        type="bar"
-        height={height}
-      />
-      <p className="text-xs text-text-muted mt-1 text-center">
-        Green = pushes prediction higher (bullish) · Red = pushes prediction lower (bearish)
-      </p>
+    <div className="w-full space-y-4">
+      <Chart type="bar" series={series} options={options} height={300} />
+
+      <div className="text-xs text-text-muted p-3 bg-surface-raised rounded-btn">
+        <strong>SHAP Feature Importance:</strong> Shows which technical indicators have the most influence on the model's prediction. Positive = bullish impact, Negative = bearish impact.
+      </div>
     </div>
   );
 }

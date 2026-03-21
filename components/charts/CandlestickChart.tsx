@@ -16,12 +16,7 @@ export interface CandlestickChartProps {
     p90?: number;
     confidence?: number;
   };
-  overlays?: {
-    vwap?: boolean;
-    ema20?: boolean;
-    ema50?: boolean;
-    bb?: boolean;
-  };
+  activeOverlays?: string[];
 }
 
 const TIMEFRAMES = ['1D', '1W', '1M', '3M', '6M', '1Y', '2Y'];
@@ -29,12 +24,69 @@ const PERIOD_MAP: Record<string, string> = {
   '1D': '1d', '1W': '1w', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y', '2Y': '2y',
 };
 
+const OVERLAY_BUTTONS = ['VWAP', 'VWAP ±1σ', 'VWAP ±2σ', 'EMA 20', 'EMA 50', 'EMA 200', 'BB', 'Supertrend', 'Fibonacci', 'Pivots', 'SMC', 'RS'];
+
+// Helper: Calculate VWAP
+function calculateVWAP(candles: any[]): any[] {
+  return candles.map((candle, i) => {
+    const slice = candles.slice(0, i + 1);
+    const cumVolumePrice = slice.reduce((sum, c) => sum + (c.close * c.volume), 0);
+    const cumVolume = slice.reduce((sum, c) => sum + c.volume, 0);
+    return { time: candle.time, value: cumVolume > 0 ? cumVolumePrice / cumVolume : candle.close };
+  });
+}
+
+// Helper: Calculate EMA
+function calculateEMA(candles: any[], period: number): any[] {
+  const result = [];
+  const k = 2 / (period + 1);
+  let ema = candles[0].close;
+  
+  for (let i = 0; i < candles.length; i++) {
+    if (i === 0) {
+      ema = candles[i].close;
+    } else {
+      ema = candles[i].close * k + ema * (1 - k);
+    }
+    result.push({ time: candles[i].time, value: ema });
+  }
+  return result;
+}
+
+// Helper: Calculate Bollinger Bands
+function calculateBB(candles: any[], period = 20): { upper: any[]; middle: any[]; lower: any[] } {
+  const middle = calculateSMA(candles, period);
+  const upper = [];
+  const lower = [];
+  
+  for (let i = period - 1; i < candles.length; i++) {
+    const slice = candles.slice(i - period + 1, i + 1);
+    const avg = slice.reduce((sum, c) => sum + c.close, 0) / period;
+    const variance = slice.reduce((sum, c) => sum + Math.pow(c.close - avg, 2), 0) / period;
+    const stdDev = Math.sqrt(variance);
+    upper.push({ time: candles[i].time, value: avg + 2 * stdDev });
+    lower.push({ time: candles[i].time, value: avg - 2 * stdDev });
+  }
+  
+  return { upper, middle, lower };
+}
+
+// Helper: Calculate SMA
+function calculateSMA(candles: any[], period: number): any[] {
+  const result = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const avg = candles.slice(i - period + 1, i + 1).reduce((sum, c) => sum + c.close, 0) / period;
+    result.push({ time: candles[i].time, value: avg });
+  }
+  return result;
+}
+
 export function CandlestickChart({
   ticker,
   period = '3M',
   showPrediction = false,
   predictionData,
-  overlays = { vwap: true, ema20: true, ema50: false, bb: false },
+  activeOverlays = ['VWAP', 'EMA 20', 'EMA 50'],
 }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
@@ -43,6 +95,7 @@ export function CandlestickChart({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<any>(null);
+  const [overlays, setOverlays] = useState<string[]>(activeOverlays);
   const { theme, systemTheme } = useTheme();
   const isDark = theme === 'dark' || (theme === 'system' && systemTheme === 'dark');
 
@@ -108,21 +161,101 @@ export function CandlestickChart({
         handleScroll: true,
         handleScale: true,
         width: containerRef.current!.clientWidth,
-        height: 360,
+        height: 500,
       });
 
       chartRef.current = chart;
 
-      // Pane 1: Candlestick
+      // PANE 1 — CANDLESTICK + OVERLAYS (60% height)
       const candleSeries = chart.addCandlestickSeries({
         upColor: CHART_COLORS.bullish,
         downColor: CHART_COLORS.bearish,
-        borderUpColor: CHART_COLORS.bullish,
-        borderDownColor: CHART_COLORS.bearish,
-        wickUpColor: CHART_COLORS.bullish,
-        wickDownColor: CHART_COLORS.bearish,
+        borderUpColor: '#047857',
+        borderDownColor: '#B91C1C',
+        wickUpColor: '#047857',
+        wickDownColor: '#B91C1C',
       });
       candleSeries.setData(priceData);
+
+      // Add overlays
+      if (overlays.includes('VWAP')) {
+        const vwapData = calculateVWAP(priceData);
+        const vwapSeries = chart.addLineSeries({
+          color: CHART_COLORS.warning,
+          lineWidth: 1.5,
+          lineStyle: 2, // dashed
+        });
+        vwapSeries.setData(vwapData);
+      }
+
+      if (overlays.includes('EMA 20')) {
+        const emaData = calculateEMA(priceData, 20);
+        const emaSeries = chart.addLineSeries({
+          color: CHART_COLORS.neutral,
+          lineWidth: 1.5,
+        });
+        emaSeries.setData(emaData);
+      }
+
+      if (overlays.includes('EMA 50')) {
+        const emaData = calculateEMA(priceData, 50);
+        const emaSeries = chart.addLineSeries({
+          color: '#7C3AED',
+          lineWidth: 1.5,
+        });
+        emaSeries.setData(emaData);
+      }
+
+      if (overlays.includes('EMA 200')) {
+        const emaData = calculateEMA(priceData, 200);
+        const emaSeries = chart.addLineSeries({
+          color: CHART_COLORS.warning,
+          lineWidth: 2,
+        });
+        emaSeries.setData(emaData);
+      }
+
+      if (overlays.includes('BB')) {
+        const { upper, middle, lower } = calculateBB(priceData, 20);
+        
+        const upperSeries = chart.addLineSeries({
+          color: '#94A3B8',
+          lineWidth: 1,
+          lineStyle: 2,
+        });
+        upperSeries.setData(upper);
+
+        const middleSeries = chart.addLineSeries({
+          color: CHART_COLORS.saffron,
+          lineWidth: 1,
+        });
+        middleSeries.setData(middle);
+
+        const lowerSeries = chart.addLineSeries({
+          color: '#94A3B8',
+          lineWidth: 1,
+          lineStyle: 2,
+        });
+        lowerSeries.setData(lower);
+      }
+
+      // PANE 2 — VOLUME (18% height)
+      const volumeData = priceData.map((c) => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? CHART_COLORS.bullish : CHART_COLORS.bearish,
+      }));
+
+      const volumeSeries = chart.addHistogramSeries({
+        color: CHART_COLORS.bullish,
+      });
+      volumeSeries.setData(
+        volumeData.map((v) => ({
+          time: v.time,
+          value: v.value,
+          color: v.color,
+        }))
+      );
 
       // Resize observer
       const ro = new ResizeObserver((entries) => {
@@ -138,6 +271,7 @@ export function CandlestickChart({
           return;
         }
         const candle = param.seriesData.get(candleSeries);
+        const volume = param.seriesData.get(volumeSeries);
         if (candle) {
           setTooltip({
             time: param.time,
@@ -146,6 +280,7 @@ export function CandlestickChart({
             low: candle.low,
             close: candle.close,
             change: ((candle.close - candle.open) / candle.open) * 100,
+            volume: volume?.value || 0,
           });
         }
       });
@@ -166,9 +301,17 @@ export function CandlestickChart({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [priceData, loading, error, isDark]);
+  }, [priceData, loading, error, isDark, overlays]);
 
-  if (loading) return <ChartSkeleton height={420} />;
+  const toggleOverlay = (overlay: string) => {
+    setOverlays((prev) =>
+      prev.includes(overlay)
+        ? prev.filter((o) => o !== overlay)
+        : [...prev, overlay]
+    );
+  };
+
+  if (loading) return <ChartSkeleton height={500} />;
 
   if (error) {
     return (
@@ -205,6 +348,24 @@ export function CandlestickChart({
         ))}
       </div>
 
+      {/* Overlay toggle buttons */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {OVERLAY_BUTTONS.map((overlay) => (
+          <button
+            key={overlay}
+            onClick={() => toggleOverlay(overlay)}
+            className="text-xs px-2.5 py-1 rounded-btn transition-all font-medium"
+            style={{
+              background: overlays.includes(overlay) ? CHART_COLORS.saffron : 'transparent',
+              color: overlays.includes(overlay) ? '#fff' : textColor,
+              border: `1px solid ${overlays.includes(overlay) ? CHART_COLORS.saffron : gridColor}`,
+            }}
+          >
+            {overlay}
+          </button>
+        ))}
+      </div>
+
       {/* Floating tooltip */}
       {tooltip && (
         <div
@@ -218,6 +379,7 @@ export function CandlestickChart({
           <span className="font-bold mr-2" style={{ color: tooltip.close >= tooltip.open ? CHART_COLORS.bullish : CHART_COLORS.bearish }}>
             C {formatPrice(tooltip.close)}
           </span>
+          <span className="text-text-secondary mr-2">Vol {formatVolume(tooltip.volume)}</span>
           <span style={{ color: tooltip.change >= 0 ? CHART_COLORS.bullish : CHART_COLORS.bearish }}>
             {formatPct(tooltip.change)}
           </span>
@@ -225,7 +387,7 @@ export function CandlestickChart({
       )}
 
       {/* Chart container */}
-      <div ref={containerRef} className="w-full rounded-card overflow-hidden" />
+      <div ref={containerRef} className="w-full rounded-card overflow-hidden" style={{ height: '500px' }} />
     </div>
   );
 }

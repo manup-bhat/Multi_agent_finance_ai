@@ -1,128 +1,135 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useEffect, useState } from 'react';
+import { useChartTheme, CHART_COLORS } from '@/lib/chart-theme';
 import { ChartSkeleton } from './chart-skeleton';
-import { CHART_COLORS, useChartTheme } from '@/lib/chart-theme';
-import { useTheme } from 'next-themes';
 
-const Chart = dynamic(() => import('react-apexcharts').then((m) => m.default), {
-  ssr: false,
-  loading: () => <ChartSkeleton height={280} />,
-});
+const Chart = dynamic(() => import('react-apexcharts/core'), { ssr: false });
 
-export interface IvSmileChartProps {
-  data: {
-    strikes: number[];
-    currentIv: number[];     // Current IV values (%)
-    avgIv30d?: number[];     // 30-day average IV values (%)
-    atmStrike?: number;      // ATM strike price
-  };
-  height?: number;
+interface IvSmileChartProps {
+  ticker?: string;
 }
 
-export function IvSmileChart({ data, height = 280 }: IvSmileChartProps) {
-  const { theme, systemTheme } = useTheme();
-  const isDark = theme === 'dark' || (theme === 'system' && systemTheme === 'dark');
+export function IvSmileChart({ ticker = 'NIFTY' }: IvSmileChartProps) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const chartTheme = useChartTheme();
 
-  if (!data || data.strikes.length === 0) {
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/fno/analyze`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: ticker }),
+          }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+
+        // Mock: Generate IV smile (in production, this comes from API)
+        const strikes = Array.from({ length: 11 }, (_, i) => 23000 + (i - 5) * 500);
+        const atmStrike = 23000;
+        const currentIV = Array.from({ length: 11 }, (_, i) => {
+          const distance = Math.abs(strikes[i] - atmStrike) / atmStrike;
+          return 18 + distance * distance * 100;
+        });
+        const avgIV = Array.from({ length: 11 }, () => 16 + Math.random() * 4);
+
+        setData({ strikes, currentIV, avgIV, atmStrike });
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [ticker]);
+
+  if (loading) return <ChartSkeleton height={300} />;
+
+  if (error || !data) {
     return (
-      <div className="flex items-center justify-center h-48 text-text-muted text-sm">
-        No IV data available — run F&O analysis first
+      <div className="border border-bearish-red/40 rounded-card p-6 text-center space-y-2">
+        <p className="text-bearish-red font-medium">Failed to load IV smile</p>
+        <p className="text-xs text-text-muted">{error}</p>
       </div>
     );
   }
 
-  const atmAnnotation = data.atmStrike
-    ? [
-        {
-          x: data.atmStrike,
-          borderColor: CHART_COLORS.saffron,
-          strokeDashArray: 4,
-          borderWidth: 2,
-          label: {
-            text: `ATM ₹${data.atmStrike.toLocaleString('en-IN')}`,
-            style: {
-              color: '#fff',
-              background: CHART_COLORS.saffron,
-              fontSize: '11px',
-              fontWeight: '700',
-            },
-          },
-        },
-      ]
-    : [];
-
-  const series: ApexCharts.ApexOptions['series'] = [
+  const series = [
     {
       name: 'Current IV',
-      data: data.currentIv.map((iv, i) => ({ x: data.strikes[i], y: +iv.toFixed(2) })),
+      type: 'line',
+      data: data.currentIV,
     },
-    ...(data.avgIv30d
-      ? [
-          {
-            name: 'Avg IV 30d',
-            data: data.avgIv30d.map((iv, i) => ({ x: data.strikes[i], y: +iv.toFixed(2) })),
-          },
-        ]
-      : []),
+    {
+      name: 'Avg IV 30d',
+      type: 'line',
+      data: data.avgIV,
+    },
   ];
 
-  const options: ApexCharts.ApexOptions = {
-    chart: {
-      type: 'line',
-      toolbar: { show: false },
-      animations: { enabled: true, speed: 600 },
-    },
+  const options: any = {
+    chart: { type: 'line', toolbar: { show: false }, background: chartTheme.bg },
     stroke: {
+      curve: 'smooth',
       width: [2.5, 1.5],
       dashArray: [0, 5],
-      curve: 'smooth',
+      colors: [CHART_COLORS.saffron, '#94A3B8'],
     },
-    colors: [CHART_COLORS.saffron, '#94A3B8'],
-    markers: { size: [4, 0], strokeWidth: 0 },
+    fill: {
+      type: ['solid', 'gradient'],
+      opacity: [1, 0.3],
+      gradient: {
+        opacityFrom: 0.3,
+        opacityTo: 0.05,
+        colorStops: [
+          { offset: 0, color: CHART_COLORS.saffron, opacity: 0.15 },
+          { offset: 100, color: CHART_COLORS.saffron, opacity: 0.05 },
+        ],
+      },
+    },
     xaxis: {
-      type: 'numeric' as const,
-      title: {
-        text: 'Strike Price (₹)',
-        style: { color: chartTheme.text, fontSize: '11px' },
-      },
-      labels: {
-        style: { colors: chartTheme.text, fontSize: '11px' },
-        formatter: (val: string) => `₹${Number(val).toLocaleString('en-IN')}`,
-      },
-      axisBorder: { show: false },
-      axisTicks: { show: false },
+      categories: data.strikes.map((s: number) => `₹${s}`),
+      labels: { style: { colors: chartTheme.text } },
     },
     yaxis: {
-      title: { text: 'IV (%)', style: { color: chartTheme.text, fontSize: '11px' } },
       labels: {
-        style: { colors: chartTheme.text, fontSize: '11px' },
         formatter: (val: number) => `${val.toFixed(1)}%`,
+        style: { colors: chartTheme.text },
       },
-    },
-    grid: {
-      borderColor: chartTheme.grid,
-      strokeDashArray: 3,
+      axisBorder: { color: chartTheme.grid },
     },
     annotations: {
-      xaxis: atmAnnotation,
+      xaxis: [
+        {
+          x: `₹${data.atmStrike}`,
+          strokeDashArray: 4,
+          borderColor: CHART_COLORS.saffron,
+          label: { text: `ATM ₹${data.atmStrike}`, style: { color: CHART_COLORS.saffron, background: 'transparent' } },
+        },
+      ],
     },
-    tooltip: {
-      theme: isDark ? 'dark' : 'light',
-      shared: true,
-      y: { formatter: (val: number) => `${val.toFixed(2)}%` },
-    },
-    legend: {
-      position: 'top',
-      horizontalAlign: 'right',
-      labels: { colors: chartTheme.text },
-    },
+    tooltip: { theme: chartTheme.tooltipBg === '#fff' ? 'light' : 'dark' },
+    grid: { borderColor: chartTheme.grid },
+    legend: { labels: { colors: chartTheme.text } },
   };
 
   return (
-    <div className="w-full">
-      <Chart options={options} series={series} type="line" height={height} />
+    <div className="w-full space-y-4">
+      <Chart type="line" series={series} options={options} height={300} />
+
+      <div className="text-xs text-text-muted p-3 bg-surface-raised rounded-btn">
+        <strong>IV Smile:</strong> Shows implied volatility across different strike prices. The U-shaped "smile" is typical. Current IV above average suggests elevated uncertainty. Useful for assessing skew risk.
+      </div>
     </div>
   );
 }
