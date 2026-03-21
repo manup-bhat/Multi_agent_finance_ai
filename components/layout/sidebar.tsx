@@ -16,7 +16,7 @@ const NAV_ITEMS = [
   { href: "/technical", label: "Technical Analysis", icon: TrendingUp },
   { href: "/predictions", label: "Predictions", icon: Sparkles },
   { href: "/sentiment", label: "Sentiment & Emotion", icon: Brain },
-  { href: "/fo-analysis", label: "F&O Analysis", icon: ScrollText },
+  { href: "/fno-analysis", label: "F&O Analysis", icon: ScrollText },
   { href: "/fii-dii", label: "FII / DII Tracker", icon: Building2 },
   { href: "/macro", label: "Macro India", icon: Globe },
   { href: "/sector-rotation", label: "Sector Rotation", icon: RefreshCw },

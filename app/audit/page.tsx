@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { getApiErrorMessage } from "@/lib/api-client";
-import { TICKERS } from "@/lib/mock-data";
+import { TICKERS } from "@/lib/nse-tickers";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 

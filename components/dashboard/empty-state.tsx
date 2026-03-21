@@ -1,6 +1,6 @@
 "use client";
 import { useApp } from "@/lib/app-context";
-import { NSE_TICKERS } from "@/lib/mock-data";
+import { NSE_TICKERS } from "@/lib/nse-tickers";
 
 // Show top 6 tickers from the NSE_TICKERS static list
 const SUGGESTIONS = NSE_TICKERS.slice(0, 6).map((t) => ({

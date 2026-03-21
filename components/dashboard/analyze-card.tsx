@@ -6,7 +6,7 @@ import { useApp } from "@/lib/app-context";
 import { analyzeStock, getApiErrorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { HelpPopover } from "@/components/ui/help-popover";
-import { NSE_TICKERS } from "@/lib/mock-data";
+import { NSE_TICKERS } from "@/lib/nse-tickers";
 
 const STAGES = [
   { label: "Pre-flight" },

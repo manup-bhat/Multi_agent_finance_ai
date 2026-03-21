@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "./theme-toggle";
 import { useApp } from "@/lib/app-context";
 import { getMacro } from "@/lib/api-client";
-import { NSE_TICKERS } from "@/lib/mock-data";
+import { NSE_TICKERS } from "@/lib/nse-tickers";
 
 interface NavbarProps {
   sidebarCollapsed: boolean;

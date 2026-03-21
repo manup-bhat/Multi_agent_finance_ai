@@ -105,3 +105,16 @@ dmypy.json
 .pyre/node_modules/
 .next/
 node_modules
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+
+# Keep .vscode/ (workspace settings useful for team)

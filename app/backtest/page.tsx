@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { runBacktest, getApiErrorMessage } from "@/lib/api-client";
 import type { BacktestResponse } from "@/lib/api-client";
-import { TICKERS } from "@/lib/mock-data";
+import { TICKERS } from "@/lib/nse-tickers";
 import { ChartSkeleton } from "@/components/charts";
 
 const EquityCurveChart = dynamic(

@@ -1,24 +1,27 @@
 // Chart system exports — all components use ApexCharts or lightweight-charts
-// Import via dynamic() for SSR safety: dynamic(() => import('@/components/charts/...'), { ssr: false })
+// Dynamic import pattern: dynamic(() => import('@/components/charts/CandlestickChart'), { ssr: false })
 
-// ApexCharts components (react-apexcharts)
-export { FearGreedGauge } from './fear-greed-gauge';
-export type { FearGreedGaugeProps } from './fear-greed-gauge';
+// ── Lightweight Charts (canvas, always ssr:false) ──────────────────────────
+export { CandlestickChart } from './CandlestickChart';
+export type { CandlestickChartProps } from './CandlestickChart';
 
-export { FiiDiiChart } from './fii-dii-chart';
-export type { FiiDiiChartProps } from './fii-dii-chart';
+// ── ApexCharts components ──────────────────────────────────────────────────
+export { FearGreedGauge } from './FearGreedGauge';
 
-export { RiskGauge } from './risk-gauge';
+export { FiiDiiChart } from './FiiDiiChart';
 
-export { SectorHeatmap } from './sector-heatmap';
+export { RiskGauge } from './RiskGauge';
+export type { RiskGaugeProps } from './RiskGauge';
 
-export { SentimentTimelineChart } from './sentiment-timeline';
-export type { SentimentTimelineChartProps } from './sentiment-timeline';
+export { SectorHeatmap } from './SectorHeatmap';
+
+export { SentimentTimelineChart } from './SentimentTimeline';
+export type { SentimentTimelineChartProps } from './SentimentTimeline';
+
+export { SparklineBar } from './SparklineBar';
 
 export { VixChart } from './VixChart';
 export type { VixChartProps } from './VixChart';
-
-export { SparklineBar } from './sparkline-bar';
 
 export { ShapChart } from './ShapChart';
 export type { ShapChartProps } from './ShapChart';
@@ -53,14 +56,7 @@ export type { PcrHistoryChartProps } from './PcrHistoryChart';
 export { FanChart } from './FanChart';
 export type { FanChartProps } from './FanChart';
 
-// Lightweight-charts component (canvas, always ssr:false)
-export { CandlestickChart } from './CandlestickChart';
-export type { CandlestickChartProps } from './CandlestickChart';
-
-// Skeleton for loading states
-export { ChartSkeleton } from './chart-skeleton';
-
-// New Chart 14-16, 19, Pivot Table
+// ── New sentiment & ML charts ──────────────────────────────────────────────
 export { CompositeSentimentBar } from './CompositeSentimentBar';
 export type { CompositeSentimentBarProps } from './CompositeSentimentBar';
 
@@ -75,3 +71,6 @@ export type { MacroAreaChartProps } from './MacroAreaChart';
 
 export { PivotTable } from './PivotTable';
 export type { PivotTableProps } from './PivotTable';
+
+// ── Loading skeleton ───────────────────────────────────────────────────────
+export { ChartSkeleton } from './chart-skeleton';
